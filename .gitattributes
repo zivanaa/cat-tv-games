@@ -1,0 +1,24 @@
+# Line endings.
+#
+# Windows installs ship `core.autocrlf=true` in the system gitconfig, which
+# rewrites checked-out files to CRLF. For a shell script that is fatal rather
+# than cosmetic: `#!/bin/sh` followed by a carriage return is read as an
+# interpreter named "sh\r", and every hook in .githooks/ dies with a "bad
+# interpreter" error the moment someone clones on Windows. The hooks are what
+# keep tool attribution out of commits, so they have to survive a clone.
+#
+# CI on ubuntu never sees the problem, which is exactly why it needs pinning
+# here instead of being left to whoever notices first.
+
+* text=auto eol=lf
+
+.githooks/commit-msg text eol=lf
+.githooks/pre-push   text eol=lf
+*.sh                 text eol=lf
+
+*.png binary
+*.jpg binary
+*.mp3 binary
+*.wav binary
+*.jks binary
+*.keystore binary
