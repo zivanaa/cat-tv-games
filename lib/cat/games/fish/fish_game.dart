@@ -19,6 +19,11 @@ class FishGame implements CatGame {
   double _difficulty = 0.4;
   bool _seeded = false;
 
+  /// Ids never repeat within a session. [onHit] matches a [PawTarget] back to a
+  /// fish by id, and the pond gains and loses fish as difficulty moves, so
+  /// index-based ids would let a fish inherit the id of one caught moments ago.
+  int _nextId = 0;
+
   @override
   String get id => gameId;
 
@@ -53,6 +58,7 @@ class FishGame implements CatGame {
   @override
   void update(double dt, Size screen) {
     if (!_seeded) _seed(screen);
+    _reconcileCount(screen);
     for (final fish in _fish) {
       fish.update(dt, screen);
     }
@@ -64,26 +70,54 @@ class FishGame implements CatGame {
     if (target == null) return;
     // A generous hit still catches the fish. The cat must never be able to tell
     // that it missed, or the feedback loop that keeps it playing breaks.
-    _fish.firstWhere((f) => f.id == target.id).catchIt();
+    //
+    // The lookup tolerates a miss instead of throwing: a hit resolves against a
+    // snapshot of the targets, and reset() or a difficulty drop can retire that
+    // fish before this runs. Losing one splash is nothing; throwing here kills
+    // the session on a surface with no human watching and no error UI.
+    for (final fish in _fish) {
+      if (fish.id == target.id) {
+        fish.catchIt();
+        break;
+      }
+    }
     // TODO(audio): splash sample, pitched up slightly for direct hits.
   }
+
+  /// Difficulty decides how many fish there are, not only how they swim, so the
+  /// pond has to be resized when it moves. This lives in [update] rather than
+  /// the setter because a new fish needs somewhere to spawn and only the caller
+  /// knows the screen.
+  ///
+  /// Growing is immediate — an appearing fish looks like an ordinary respawn.
+  /// Shrinking only ever retires a fish that is already caught and off screen.
+  /// Deleting one mid-swim would blink a target out from under a watching cat,
+  /// which is the tracking break CAT_UX.md rules out.
+  void _reconcileCount(Size screen) {
+    while (_fish.length < _count) {
+      _fish.add(_spawn(screen));
+    }
+    var surplus = _fish.length - _count;
+    if (surplus <= 0) return;
+    _fish.removeWhere((fish) {
+      if (surplus == 0 || !fish.isCaught) return false;
+      surplus--;
+      return true;
+    });
+  }
+
+  Fish _spawn(Size screen) => Fish(
+        id: _nextId++,
+        position: randomSpawn(screen, _radius, _random),
+        speed: _speed,
+        radius: _radius,
+        random: _random,
+      );
 
   void _seed(Size screen) {
     _fish
       ..clear()
-      ..addAll([
-        for (var i = 0; i < _count; i++)
-          Fish(
-            id: i,
-            position: Offset(
-              _random.nextDouble() * screen.width,
-              _random.nextDouble() * screen.height,
-            ),
-            speed: _speed,
-            radius: _radius,
-            random: _random,
-          ),
-      ]);
+      ..addAll([for (var i = 0; i < _count; i++) _spawn(screen)]);
     _seeded = true;
   }
 
