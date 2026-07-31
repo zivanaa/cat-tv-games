@@ -31,6 +31,9 @@ class FishGame implements CatGame {
   String get displayName => 'Fish pond';
 
   @override
+  double get difficulty => _difficulty;
+
+  @override
   set difficulty(double value) {
     _difficulty = value.clamp(0.0, 1.0).toDouble();
     for (final fish in _fish) {

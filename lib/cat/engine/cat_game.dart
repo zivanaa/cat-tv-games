@@ -25,6 +25,11 @@ abstract class CatGame {
 
   /// Difficulty in 0..1, driven by the cat's recent hit rate. Games are expected
   /// to slow targets down and grow them when this drops.
+  ///
+  /// Readable as well as writable because the adjustment is relative:
+  /// [SessionRecorder.suggestedDifficulty] nudges the current value rather than
+  /// setting an absolute one, so the caller has to be able to ask what it is.
+  double get difficulty;
   set difficulty(double value);
 
   void reset();

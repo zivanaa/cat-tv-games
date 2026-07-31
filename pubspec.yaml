@@ -9,6 +9,7 @@ environment:
 # Versions are deliberately not pinned here. Run the `flutter pub add` commands
 # in README.md so the resolver picks versions that match your installed SDK.
 dependencies:
+  flame: ^1.38.0
   flutter:
     sdk: flutter
 
