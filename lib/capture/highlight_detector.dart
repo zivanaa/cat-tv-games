@@ -69,7 +69,8 @@ class HighlightDetector {
   }
 
   void _prune(DateTime now) {
-    while (_contacts.isNotEmpty && now.difference(_contacts.first.at) > window) {
+    while (
+        _contacts.isNotEmpty && now.difference(_contacts.first.at) > window) {
       _contacts.removeFirst();
     }
   }

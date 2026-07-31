@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import '../../capture/highlight_detector.dart';
 import '../engine/paw_input.dart';
 
@@ -33,7 +31,11 @@ class SessionRecorder {
   /// screen leads with.
   double get accuracy => contacts == 0 ? 0 : directHits / contacts;
 
-  HighlightTrigger? record(PawHit hit, {required DateTime at, bool multiTouch = false}) {
+  HighlightTrigger? record(
+    PawHit hit, {
+    required DateTime at,
+    bool multiTouch = false,
+  }) {
     contacts++;
     score += hit.weight;
     switch (hit.tier) {
@@ -58,7 +60,9 @@ class SessionRecorder {
 
   double suggestedDifficulty(double current) {
     if (contacts < 12) return current;
-    if (accuracy < strugglingBelow) return (current - 0.15).clamp(0.0, 1.0).toDouble();
+    if (accuracy < strugglingBelow) {
+      return (current - 0.15).clamp(0.0, 1.0).toDouble();
+    }
     if (accuracy > 0.6) return (current + 0.1).clamp(0.0, 1.0).toDouble();
     return current;
   }

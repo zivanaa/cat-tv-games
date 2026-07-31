@@ -50,7 +50,11 @@ void main() {
     const far = Offset(300, 340);
 
     final first = input.resolve(
-      point: far, targets: [target(const Offset(400, 200))], screen: screen, now: now);
+      point: far,
+      targets: [target(const Offset(400, 200))],
+      screen: screen,
+      now: now,
+    );
     expect(first.tier, HitTier.generous);
 
     final second = input.resolve(
@@ -66,7 +70,12 @@ void main() {
     final input = PawInput();
     final targets = [target(const Offset(400, 200))];
 
-    input.resolve(point: const Offset(400, 200), targets: targets, screen: screen, now: now);
+    input.resolve(
+      point: const Offset(400, 200),
+      targets: targets,
+      screen: screen,
+      now: now,
+    );
     final repeat = input.resolve(
       point: const Offset(405, 202),
       targets: targets,
@@ -90,7 +99,11 @@ void main() {
   test('nothing on screen means nothing scores', () {
     final input = PawInput();
     final hit = input.resolve(
-      point: const Offset(400, 200), targets: const [], screen: screen, now: now);
+      point: const Offset(400, 200),
+      targets: const [],
+      screen: screen,
+      now: now,
+    );
     expect(hit.tier, HitTier.miss);
   });
 }

@@ -7,13 +7,13 @@ class CatTvApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return const MaterialApp(
       title: 'Cat TV',
       debugShowCheckedModeBanner: false,
       // TODO(theme): AppTheme in lib/core/theme/. The human surface sells the
       // app, so it gets the design attention; the cat surface only needs high
       // contrast and motion.
-      home: const Scaffold(
+      home: Scaffold(
         body: Center(child: Text('TODO: home screen')),
       ),
     );

@@ -114,11 +114,11 @@ class PawHit {
 }
 
 class PawInput {
-  PawInput({PawInputConfig config = const PawInputConfig()}) : _config = config;
+  PawInput({this.config = const PawInputConfig()});
 
-  PawInputConfig _config;
-  PawInputConfig get config => _config;
-  set config(PawInputConfig value) => _config = value;
+  /// Mutable on purpose: a session that is going badly swaps this for
+  /// [PawInputConfig.moreForgiving] without rebuilding the input handler.
+  PawInputConfig config;
 
   DateTime? _lastGenerousAt;
   DateTime? _lastContactAt;
@@ -146,7 +146,7 @@ class PawInput {
     var nearestDistance = double.infinity;
     for (final target in live) {
       final distance = (target.center - point).distance;
-      final effective = math.max(target.radius, _config.minTargetRadius);
+      final effective = math.max(target.radius, config.minTargetRadius);
 
       if (distance <= effective) {
         return PawHit(tier: HitTier.direct, target: target, point: point);
@@ -157,8 +157,8 @@ class PawInput {
       }
     }
 
-    final assistRadius =
-        math.max(nearest!.radius, _config.minTargetRadius) * _config.assistMultiplier;
+    final assistRadius = math.max(nearest!.radius, config.minTargetRadius) *
+        config.assistMultiplier;
     if (nearestDistance <= assistRadius) {
       return PawHit(tier: HitTier.assisted, target: nearest, point: point);
     }
@@ -176,16 +176,16 @@ class PawInput {
     final last = _lastContactAt;
     final lastPoint = _lastContactPoint;
     if (last == null || lastPoint == null) return false;
-    if (now.difference(last) >= _config.debounce) return false;
-    return (point - lastPoint).distance < _config.minTargetRadius;
+    if (now.difference(last) >= config.debounce) return false;
+    return (point - lastPoint).distance < config.minTargetRadius;
   }
 
   bool _canBeGenerous(double distance, Size screen, DateTime now) {
-    if (_config.generosity <= 0) return false;
-    final reach = math.max(screen.width, screen.height) * _config.generosity;
+    if (config.generosity <= 0) return false;
+    final reach = math.max(screen.width, screen.height) * config.generosity;
     if (distance > reach) return false;
     final last = _lastGenerousAt;
-    return last == null || now.difference(last) >= _config.generousCooldown;
+    return last == null || now.difference(last) >= config.generousCooldown;
   }
 
   void reset() {

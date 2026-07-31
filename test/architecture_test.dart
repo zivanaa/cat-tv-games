@@ -31,17 +31,25 @@ void main() {
       final lines = entity.readAsLinesSync();
       for (var i = 0; i < lines.length; i++) {
         final line = lines[i].trim();
-        if (!line.startsWith('import ') && !line.startsWith('export ')) continue;
+        if (!line.startsWith('import ') && !line.startsWith('export ')) {
+          continue;
+        }
 
         for (final entry in forbidden.entries) {
           if (line.contains(entry.key)) {
-            violations.add('${entity.path}:${i + 1} -> ${entry.key} (${entry.value})');
+            violations.add(
+              '${entity.path}:${i + 1} -> ${entry.key} (${entry.value})',
+            );
           }
         }
       }
     }
 
-    expect(violations, isEmpty, reason: 'Boundary violations:\n${violations.join('\n')}');
+    expect(
+      violations,
+      isEmpty,
+      reason: 'Boundary violations:\n${violations.join('\n')}',
+    );
   });
 
   test('cat surface shows no dialogs, snackbars, or bottom sheets', () {
@@ -54,10 +62,16 @@ void main() {
       if (entity is! File || !entity.path.endsWith('.dart')) continue;
       final source = entity.readAsStringSync();
       for (final symbol in banned) {
-        if (source.contains(symbol)) violations.add('${entity.path} -> $symbol');
+        if (source.contains(symbol)) {
+          violations.add('${entity.path} -> $symbol');
+        }
       }
     }
 
-    expect(violations, isEmpty, reason: 'Banned UI on cat surface:\n${violations.join('\n')}');
+    expect(
+      violations,
+      isEmpty,
+      reason: 'Banned UI on cat surface:\n${violations.join('\n')}',
+    );
   });
 }

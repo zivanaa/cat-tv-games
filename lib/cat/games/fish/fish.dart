@@ -43,11 +43,17 @@ class Fish {
     // and reappearing at the other breaks a cat's tracking.
     if (position.dx < radius || position.dx > screen.width - radius) {
       _heading = math.pi - _heading;
-      position = Offset(position.dx.clamp(radius, screen.width - radius).toDouble(), position.dy);
+      position = Offset(
+        position.dx.clamp(radius, screen.width - radius).toDouble(),
+        position.dy,
+      );
     }
     if (position.dy < radius || position.dy > screen.height - radius) {
       _heading = -_heading;
-      position = Offset(position.dx, position.dy.clamp(radius, screen.height - radius).toDouble());
+      position = Offset(
+        position.dx,
+        position.dy.clamp(radius, screen.height - radius).toDouble(),
+      );
     }
   }
 
