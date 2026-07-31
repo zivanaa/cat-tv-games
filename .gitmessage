@@ -1,0 +1,9 @@
+# <type>(<scope>): <subject>          <- 72 chars max, lower case, imperative
+#
+# <body: why, not what. wrap at 72.>
+#
+# <footer: Closes #123>
+#
+# types:  feat fix chore docs refactor test perf ci build style
+# scopes: cat human engine fish mouse laser tv capture session
+#         core data store stats profiles ui deps ci docs

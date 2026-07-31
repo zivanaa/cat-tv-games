@@ -1,0 +1,65 @@
+#!/bin/sh
+# Strips tool attribution, then enforces Conventional Commits.
+#
+# The stripping is a backstop. Claude Code is configured in .claude/settings.json
+# not to add trailers in the first place; this catches anything from another
+# tool, another machine, or a config that did not load.
+
+msg_file="$1"
+[ -f "$msg_file" ] || exit 0
+
+tmp="$(mktemp)" || exit 1
+grep -viE \
+  -e '^Co-Authored-By:[[:space:]]*(Claude|AI|Cursor|Copilot|Codex|Devin|Aider)' \
+  -e '^[[:space:]]*(🤖[[:space:]]*)?Generated with \[?Claude Code' \
+  -e '^[[:space:]]*(🤖[[:space:]]*)?Generated with (AI|Cursor|Copilot)' \
+  -e '^Session: https://(claude\.ai|claude\.com)/' \
+  "$msg_file" > "$tmp"
+
+# Squeeze the blank lines left behind by the removal, and trim trailing ones.
+awk '
+  /^[[:space:]]*$/ { blank++; next }
+  { if (NR > 1 && blank > 0) print ""; blank = 0; print }
+' "$tmp" > "$msg_file"
+rm -f "$tmp"
+
+subject="$(sed -n '1p' "$msg_file")"
+
+# Git-generated subjects are not ours to police.
+case "$subject" in
+  Merge*|Revert*|fixup!*|squash!*|'#'*) exit 0 ;;
+esac
+
+types='feat|fix|chore|docs|refactor|test|perf|ci|build|style'
+scopes='cat|human|engine|fish|mouse|laser|tv|capture|session|core|data|store|stats|profiles|ui|deps|ci|docs'
+
+if ! printf '%s' "$subject" | grep -qE "^($types)(\(($scopes)\))?!?: [a-z].*$"; then
+  cat >&2 <<MSG
+
+  Commit message rejected.
+
+  Format:  <type>(<scope>): <subject in lower case, imperative>
+  Types:   $types
+  Scopes:  $scopes   (optional)
+
+  Good:    feat(engine): add generous tier to paw hit detection
+           fix(capture): stop the buffer flushing twice per trigger
+           docs: explain why the cat surface has no back button
+  Bad:     Added stuff      (not a type, past tense, capitalised)
+           feat: Fix Thing  (capitalised subject)
+
+  Full convention: docs/CONTRIBUTING.md
+
+MSG
+  exit 1
+fi
+
+if [ "${#subject}" -gt 72 ]; then
+  echo "" >&2
+  echo "  Subject is ${#subject} characters; keep it to 72." >&2
+  echo "  Move the detail into the commit body." >&2
+  echo "" >&2
+  exit 1
+fi
+
+exit 0

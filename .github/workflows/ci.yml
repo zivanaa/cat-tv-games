@@ -1,0 +1,66 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  conventions:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Branch name
+        run: |
+          branch="${{ github.head_ref }}"
+          types='feat|fix|chore|docs|refactor|test|perf|ci|build|style'
+          if ! printf '%s' "$branch" | grep -qE "^($types)/([0-9]+-)?[a-z0-9]+(-[a-z0-9]+)*$"; then
+            echo "::error::Branch '$branch' does not match <type>/<kebab-case>. See docs/CONTRIBUTING.md"
+            exit 1
+          fi
+
+      - name: Commit messages
+        run: |
+          types='feat|fix|chore|docs|refactor|test|perf|ci|build|style'
+          scopes='cat|human|engine|fish|mouse|laser|tv|capture|session|core|data|store|stats|profiles|ui|deps|ci|docs'
+          status=0
+          while read -r sha; do
+            subject=$(git log -1 --format=%s "$sha")
+            case "$subject" in Merge*|Revert*|fixup!*|squash!*) continue ;; esac
+            if ! printf '%s' "$subject" | grep -qE "^($types)(\(($scopes)\))?!?: [a-z].*$"; then
+              echo "::error::Bad commit subject: $subject"
+              status=1
+            fi
+            if [ "${#subject}" -gt 72 ]; then
+              echo "::error::Subject over 72 chars: $subject"
+              status=1
+            fi
+          done < <(git rev-list origin/${{ github.base_ref }}..HEAD)
+          exit $status
+        shell: bash
+
+      - name: No tool attribution in commits
+        run: |
+          if git log origin/${{ github.base_ref }}..HEAD --format=%B \
+             | grep -qiE '^Co-Authored-By:[[:space:]]*(Claude|AI|Cursor|Copilot)|Generated with \[?Claude Code'; then
+            echo "::error::A commit carries tool attribution. Rebase to remove it, or install the hooks: git config core.hooksPath .githooks"
+            exit 1
+          fi
+
+  analyze-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: dart format --set-exit-if-changed lib test
+      - run: flutter analyze
+      # Includes the cat/human boundary test. A failure here means the cat
+      # surface can reach monetization code — treat it as a release blocker.
+      - run: flutter test

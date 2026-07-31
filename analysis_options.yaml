@@ -1,0 +1,15 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    - prefer_const_constructors
+    - prefer_final_locals
+    - avoid_print
+    - require_trailing_commas
+    - unawaited_futures
+    - always_declare_return_types
+
+analyzer:
+  errors:
+    avoid_print: error
+    todo: ignore
