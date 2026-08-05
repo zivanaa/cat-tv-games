@@ -4,6 +4,7 @@ import 'dart:ui';
 import '../../engine/cat_game.dart';
 import '../../engine/paw_input.dart';
 import 'fish.dart';
+import 'fish_species.dart';
 
 /// The first mode, and the one to get right before building any other.
 ///
@@ -38,7 +39,7 @@ class FishGame implements CatGame {
     _difficulty = value.clamp(0.0, 1.0).toDouble();
     for (final fish in _fish) {
       fish.speed = _speed;
-      fish.radius = _radius;
+      fish.radius = _radius * fish.species.sizeScale;
     }
   }
 
@@ -46,6 +47,23 @@ class FishGame implements CatGame {
   double get _speed => 40 + _difficulty * 90;
   double get _radius => 56 - _difficulty * 16;
   int get _count => 3 + (_difficulty * 3).round();
+
+  /// A read-only snapshot for the render layer. Kept separate from [targets],
+  /// which is the input contract and deliberately knows nothing about how a
+  /// fish looks.
+  List<FishView> get views => [for (final fish in _fish) fish.view];
+
+  /// Weighted so the pond still reads as a pond rather than an aquarium
+  /// catalogue. Goldfish are the texture; the rest are the reason to keep
+  /// looking. Koi are rarest because a slow easy target everywhere would
+  /// flatten the difficulty curve the session recorder is trying to steer.
+  FishSpecies _pickSpecies() {
+    final roll = _random.nextDouble();
+    if (roll < 0.45) return FishSpecies.goldfish;
+    if (roll < 0.72) return FishSpecies.darter;
+    if (roll < 0.89) return FishSpecies.angel;
+    return FishSpecies.koi;
+  }
 
   @override
   List<PawTarget> get targets => [
@@ -109,13 +127,18 @@ class FishGame implements CatGame {
     });
   }
 
-  Fish _spawn(Size screen) => Fish(
-        id: _nextId++,
-        position: randomSpawn(screen, _radius, _random),
-        speed: _speed,
-        radius: _radius,
-        random: _random,
-      );
+  Fish _spawn(Size screen) {
+    final species = _pickSpecies();
+    final radius = _radius * species.sizeScale;
+    return Fish(
+      id: _nextId++,
+      species: species,
+      position: randomSpawn(screen, radius, _random),
+      speed: _speed,
+      radius: radius,
+      random: _random,
+    );
+  }
 
   void _seed(Size screen) {
     _fish

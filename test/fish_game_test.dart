@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:cat_tv_games/cat/engine/paw_input.dart';
 import 'package:cat_tv_games/cat/games/fish/fish.dart';
 import 'package:cat_tv_games/cat/games/fish/fish_game.dart';
+import 'package:cat_tv_games/cat/games/fish/fish_species.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -15,53 +16,74 @@ void main() {
   PawHit hitOn(PawTarget target) =>
       PawHit(tier: HitTier.direct, target: target, point: target.center);
 
-  test('no fish spends more than a bounce flattened against an edge', () {
-    // Regression guard, and the reason this file exists.
+  /// Sixty seconds of play across twelve ponds. At 40 to 180px/s in an 800px
+  /// pond that is thousands of pixels of travel per fish, so every wall gets met
+  /// repeatedly and at every angle.
+  ({int stillest, int longestOnEdge}) simulate() {
+    var stillest = 0;
+    var longestOnEdge = 0;
+
+    for (var seed = 0; seed < 12; seed++) {
+      final game = FishGame(random: math.Random(seed));
+      final edge = <Object, int>{};
+      final still = <Object, int>{};
+      final previous = <Object, Offset>{};
+
+      for (var frame = 0; frame < 2400; frame++) {
+        game.update(step, screen);
+        for (final fish in game.views) {
+          if (fish.caughtProgress > 0) continue;
+          final r = fish.radius;
+          final onEdge = fish.position.dx <= r + 0.001 ||
+              fish.position.dx >= screen.width - r - 0.001 ||
+              fish.position.dy <= r + 0.001 ||
+              fish.position.dy >= screen.height - r - 0.001;
+          edge[fish.id] = onEdge ? (edge[fish.id] ?? 0) + 1 : 0;
+          longestOnEdge = math.max(longestOnEdge, edge[fish.id]!);
+
+          final was = previous[fish.id];
+          final moved =
+              was == null ? double.infinity : (fish.position - was).distance;
+          previous[fish.id] = fish.position;
+          still[fish.id] = moved < 0.4 ? (still[fish.id] ?? 0) + 1 : 0;
+          stillest = math.max(stillest, still[fish.id]!);
+        }
+      }
+    }
+
+    return (stillest: stillest, longestOnEdge: longestOnEdge);
+  }
+
+  test('a fish never goes still', () {
+    // This is the property that actually matters, and the reason this file
+    // exists. docs/CAT_UX.md: nothing on the cat surface should be still for
+    // more than a couple of seconds, because a target that stops moving is a
+    // target a cat stops watching.
     //
-    // Two defects pressed fish into the border, and the second did nearly all
-    // of the damage:
+    // It replaced a narrower guard that counted frames spent touching an edge.
+    // That proxy was wrong: it could not tell a fish pinned motionless against
+    // the border from one swimming along it, and it failed the moment the
+    // species gaits landed even though nothing had actually gone still.
+    expect(simulate().stillest, lessThanOrEqualTo(2));
+  });
+
+  test('no fish is held against an edge', () {
+    // The bug this started from. Two defects pressed fish into the border:
     //
     // 1. The bounce reflected the bare heading while the fish actually
     //    travelled heading + wobble, so the reflected course could still point
     //    into the wall and be clamped again on the next frame.
     // 2. _respawn drew from [0, extent] when the legal band is
     //    [radius, extent - radius], so roughly a fifth of respawns put the fish
-    //    partly off screen. The bounce flattened it against the edge on its
-    //    first frame and it stayed there.
+    //    partly off screen and the bounce flattened it there on frame one.
     //
-    // Measured across 12 seeds x 60s of play: the original code held a fish on
-    // an edge for up to 91 consecutive frames, over two seconds of a target
-    // pinned motionless to the border — the stillness CAT_UX.md says makes a
-    // cat look away. Fixing the reflection alone only brought it to 81. Both
-    // together bring it to 2.
-    var worst = 0;
-
-    // Several seeds, because one pond can get lucky and never meet a wall at an
-    // awkward angle.
-    for (var seed = 0; seed < 12; seed++) {
-      final game = FishGame(random: math.Random(seed));
-      final streaks = <Object, int>{};
-
-      // Sixty seconds of play. At 76px/s across an 800px pond that is thousands
-      // of pixels of travel, so every fish meets a wall repeatedly.
-      for (var frame = 0; frame < 2400; frame++) {
-        game.update(step, screen);
-        for (final target in game.targets) {
-          final r = target.radius;
-          final onEdge = target.center.dx <= r + 0.001 ||
-              target.center.dx >= screen.width - r - 0.001 ||
-              target.center.dy <= r + 0.001 ||
-              target.center.dy >= screen.height - r - 0.001;
-          final streak = onEdge ? (streaks[target.id] ?? 0) + 1 : 0;
-          streaks[target.id] = streak;
-          if (streak > worst) worst = streak;
-        }
-      }
-    }
-
-    // One frame on the edge is the bounce itself; two is a corner. Beyond that
-    // a fish is being held against the border again.
-    expect(worst, lessThanOrEqualTo(2));
+    // Measured over 12 seeds x 60s. Original code: 91 consecutive frames, over
+    // two seconds welded to the border. Reflection fix alone: 81. Both: 2.
+    // Adding the species gaits took it to 7 — a fifth of a second of a fish
+    // swimming along the edge, which the stillness test above confirms is
+    // travel and not a stall. The bound is set at 12 to leave gait headroom
+    // while still catching anything like the original two-second stall.
+    expect(simulate().longestOnEdge, lessThanOrEqualTo(12));
   });
 
   test('a fish is never spawned partly outside the pond', () {
@@ -151,5 +173,69 @@ void main() {
 
     // Every id ever handed out is still unique across the whole run.
     expect(seen.length, greaterThanOrEqualTo(6));
+  });
+
+  test('every species turns up in the pond', () {
+    // A weighting that quietly never produces a koi would cost the mode its
+    // easiest target and nobody would notice from looking at it.
+    final seen = <FishSpecies>{};
+    for (var seed = 0;
+        seed < 40 && seen.length < FishSpecies.values.length;
+        seed++) {
+      final game = FishGame(random: math.Random(seed));
+      game.difficulty = 1;
+      for (var frame = 0; frame < 400; frame++) {
+        game.update(step, screen);
+        for (final fish in game.views) {
+          seen.add(fish.species);
+        }
+      }
+    }
+
+    expect(seen, containsAll(FishSpecies.values));
+  });
+
+  test('a koi never darts and a darter does', () {
+    // The gaits are the point of having species at all. If every fish ended up
+    // moving the same way the pond would read as one repeating pattern again.
+    final darted = <FishSpecies, bool>{};
+
+    for (var seed = 0; seed < 20; seed++) {
+      final game = FishGame(random: math.Random(seed));
+      game.difficulty = 1;
+      for (var frame = 0; frame < 2400; frame++) {
+        game.update(step, screen);
+        for (final fish in game.views) {
+          darted[fish.species] =
+              (darted[fish.species] ?? false) || fish.darting;
+        }
+      }
+    }
+
+    expect(darted[FishSpecies.koi], isNot(isTrue), reason: 'koi never dart');
+    expect(darted[FishSpecies.darter], isTrue, reason: 'darters do');
+  });
+
+  test('the smallest species is still catchable', () {
+    // A darter is drawn at well under the minimum touch target. That is only
+    // safe because PawInput floors every target at minTargetRadius — if the
+    // floor ever stopped applying, the fastest fish would become the one a cat
+    // can never land, which is the zero-score session the whole design is
+    // built to avoid.
+    const config = PawInputConfig();
+    final input = PawInput(config: config);
+    final radius = 56 * FishSpecies.darter.sizeScale;
+    expect(radius, lessThan(config.minTargetRadius));
+
+    final hit = input.resolve(
+      point: const Offset(400, 200).translate(config.minTargetRadius - 2, 0),
+      targets: [
+        PawTarget(id: 'darter', center: const Offset(400, 200), radius: radius),
+      ],
+      screen: screen,
+      now: DateTime(2026),
+    );
+
+    expect(hit.tier, HitTier.direct);
   });
 }
