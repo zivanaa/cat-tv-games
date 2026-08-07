@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flame/game.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../shared/widgets/exit_guard.dart';
+import '../audio/cat_audio.dart';
 import '../engine/paw_input.dart';
 import '../session/session_recorder.dart';
 import 'fish_pond_game.dart';
@@ -23,12 +26,28 @@ class CatSurface extends StatefulWidget {
 }
 
 class _CatSurfaceState extends State<CatSurface> {
-  late final FishPondGame _game = FishPondGame();
+  final CatAudio _audio = FlameCatAudio();
+  late final FishPondGame _game = FishPondGame(audio: _audio);
   late final SessionRecorder _session = SessionRecorder(
     catId: widget.catId,
     gameId: _game.rules.id,
     startedAt: DateTime.now(),
   );
+
+  @override
+  void initState() {
+    super.initState();
+    // Fire and forget. The pond is playable while the samples land; the only
+    // cost of a contact before they do is a missing splash, and blocking the
+    // first frame on an audio plugin would be worse.
+    unawaited(_audio.preload());
+  }
+
+  @override
+  void dispose() {
+    unawaited(_audio.dispose());
+    super.dispose();
+  }
 
   void _onPointerDown(PointerDownEvent event) {
     final now = DateTime.now();

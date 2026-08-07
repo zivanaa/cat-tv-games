@@ -10,6 +10,7 @@ environment:
 # in README.md so the resolver picks versions that match your installed SDK.
 dependencies:
   flame: ^1.38.0
+  flame_audio: ^2.12.2
   flutter:
     sdk: flutter
 

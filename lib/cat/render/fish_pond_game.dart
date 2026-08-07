@@ -4,6 +4,9 @@ import 'dart:ui';
 import 'package:flame/extensions.dart';
 import 'package:flame/game.dart';
 
+import '../audio/cat_audio.dart';
+import '../audio/cat_sound.dart';
+import '../audio/sound_policy.dart';
 import '../engine/paw_input.dart';
 import '../games/fish/fish.dart';
 import '../games/fish/fish_game.dart';
@@ -16,14 +19,37 @@ import '../games/fish/fish_species.dart';
 /// `lib/cat/games/`, so they stay testable without a game loop — see CLAUDE.md.
 /// Nothing here decides anything a test would want to assert on.
 class FishPondGame extends FlameGame {
-  FishPondGame({FishGame? rules, PawInput? input, math.Random? random})
-      : rules = rules ?? FishGame(random: random),
-        input = input ?? PawInput();
+  FishPondGame({
+    FishGame? rules,
+    PawInput? input,
+    CatAudio? audio,
+    SoundPolicy? sound,
+    math.Random? random,
+  })  : rules = rules ?? FishGame(random: random),
+        input = input ?? PawInput(),
+        audio = audio ?? SilentCatAudio(),
+        sound = sound ?? SoundPolicy(random: random);
 
   final FishGame rules;
   final PawInput input;
+  final CatAudio audio;
+  final SoundPolicy sound;
 
   final List<_Splash> _splashes = [];
+
+  /// Which fish were darting last frame, so a dart is noticed as it starts
+  /// rather than re-firing for every frame it lasts.
+  final Set<Object> _darting = {};
+
+  /// Seconds since the pond last made a noise. Silence is what the ambient
+  /// chirp is for: docs/CAT_UX.md notes that many cats ignore the screen
+  /// entirely until they hear something, so a pond nobody is playing with has
+  /// to speak up on its own.
+  double _quietFor = 0;
+
+  /// Long enough never to compete with play, short enough to catch a cat that
+  /// has wandered off mid-session.
+  static const _chirpAfterQuiet = 7.0;
 
   /// Deep water. Blues and yellows are what a dichromatic eye reads strongly;
   /// docs/CAT_UX.md rules out building a theme around red, so the whole palette
@@ -42,6 +68,29 @@ class FishPondGame extends FlameGame {
       splash.age += dt;
     }
     _splashes.removeWhere((splash) => splash.age >= _Splash.life);
+
+    _quietFor += dt;
+    _voiceDarts();
+    if (_quietFor >= _chirpAfterQuiet) _speak(CatSound.chirp, volume: 0.5);
+  }
+
+  /// A rustle on the frame a fish breaks into a dart. The sound is the point of
+  /// the dart: a movement a cat may not be looking at becomes one it hears.
+  void _voiceDarts() {
+    for (final fish in rules.views) {
+      if (fish.darting) {
+        if (_darting.add(fish.id)) _speak(CatSound.rustle, volume: 0.35);
+      } else {
+        _darting.remove(fish.id);
+      }
+    }
+  }
+
+  void _speak(CatSound which, {double volume = 1.0}) {
+    final cue = sound.request(which, DateTime.now(), volume: volume);
+    if (cue == null) return;
+    audio.play(cue);
+    _quietFor = 0;
   }
 
   /// A paw landed. Resolved on pointer down rather than tap-up, because a bat at
@@ -59,6 +108,11 @@ class FishPondGame extends FlameGame {
       // The splash lands on the fish, not on the paw. An assisted or generous
       // hit has to look identical to a direct one or the cat learns it missed.
       _splashes.add(_Splash(hit.target?.center ?? point));
+    }
+    final cue = sound.forHit(hit, now);
+    if (cue != null) {
+      audio.play(cue);
+      _quietFor = 0;
     }
     return hit;
   }
