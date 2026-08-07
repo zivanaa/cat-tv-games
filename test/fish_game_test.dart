@@ -32,7 +32,9 @@ void main() {
       for (var frame = 0; frame < 2400; frame++) {
         game.update(step, screen);
         for (final fish in game.views) {
-          if (fish.caughtProgress > 0) continue;
+          // A fish still crossing in is outside the pond on purpose and the
+          // bounce is suspended for it, so neither guard below applies yet.
+          if (fish.caughtProgress > 0 || fish.entering) continue;
           final r = fish.radius;
           final onEdge = fish.position.dx <= r + 0.001 ||
               fish.position.dx >= screen.width - r - 0.001 ||
@@ -119,42 +121,102 @@ void main() {
     expect(() => game.onHit(hitOn(stale)), returnsNormally);
   });
 
-  test('raising difficulty actually adds fish', () {
-    // The count getter existed but only ever ran at seed time, so difficulty
-    // changed how the fish swam and never how many there were.
-    final game = FishGame(random: math.Random(7));
-    game.update(step, screen);
-    expect(game.targets.length, 5, reason: 'difficulty starts at 0.4');
+  test('a struggling cat is given more targets, not fewer', () {
+    // This ran backwards, and it fought the two settings either side of it.
+    // The count was `3 + difficulty * 4`, so the cat that was missing
+    // everything got the emptiest pond — three fish — while a cat already
+    // scoring got seven. Every extra fish is another chance to land something,
+    // so the count was undoing the slower, bigger fish that the same difficulty
+    // drop had just granted.
+    final easy = FishGame(random: math.Random(7))..difficulty = 0;
+    easy.update(step, screen);
+    final hard = FishGame(random: math.Random(7))..difficulty = 1;
+    hard.update(step, screen);
 
-    game.difficulty = 1.0;
+    expect(easy.targets.length, 7);
+    expect(hard.targets.length, 3);
+    expect(easy.targets.length, greaterThan(hard.targets.length));
+  });
+
+  test('easing the difficulty brings more fish in', () {
+    final game = FishGame(random: math.Random(7));
+    game.difficulty = 1;
+    game.update(step, screen);
+    expect(game.targets.length, 3);
+
+    game.difficulty = 0;
     game.update(step, screen);
     expect(game.targets.length, 7);
   });
 
-  test('shrinking the pond never removes a fish mid-swim', () {
+  test('a harder pond thins out only as fish are caught', () {
     final game = FishGame(random: math.Random(7));
-    game.difficulty = 1.0;
+    game.difficulty = 0;
     game.update(step, screen);
     expect(game.targets.length, 7);
 
-    // Wants three, but every fish is on screen and being tracked.
-    game.difficulty = 0.0;
+    // Now wants three, but all seven are on screen and being watched, so none
+    // of them may simply blink out.
+    game.difficulty = 1;
     game.update(step, screen);
-    expect(game.targets.length, 7);
-  });
-
-  test('the pond shrinks by retiring fish that are already caught', () {
-    final game = FishGame(random: math.Random(7));
-    game.difficulty = 1.0;
-    game.update(step, screen);
+    expect(game.targets.length, 7, reason: 'nothing has been caught yet');
 
     final caught = game.targets.first;
     game.onHit(hitOn(caught));
-    game.difficulty = 0.0;
     game.update(step, screen);
 
     expect(game.targets.length, 6);
     expect(game.targets.any((t) => t.id == caught.id), isFalse);
+  });
+
+  test('a fish joining mid-session swims in from outside the pond', () {
+    // It used to be dropped at a random point in open water, so easing the
+    // difficulty made a fish appear out of nothing in the middle of a screen
+    // the cat was watching. CAT_UX.md rules that break out for edge-to-edge
+    // wrapping; materialising in clear water is the same break.
+    final game = FishGame(random: math.Random(3));
+    game.difficulty = 1;
+    game.update(step, screen);
+    final before = game.views.map((f) => f.id).toSet();
+
+    game.difficulty = 0;
+    game.update(step, screen);
+    final arrivals = game.views.where((f) => !before.contains(f.id)).toList();
+    expect(arrivals, isNotEmpty);
+
+    for (final fish in arrivals) {
+      expect(fish.entering, isTrue);
+      final r = fish.radius;
+      final outside = fish.position.dx < r ||
+          fish.position.dx > screen.width - r ||
+          fish.position.dy < r ||
+          fish.position.dy > screen.height - r;
+      expect(outside, isTrue, reason: 'must start beyond the edge');
+    }
+
+    // And it cannot be scored against while it is still half off screen.
+    final entering = arrivals.map((f) => f.id).toSet();
+    for (final target in game.targets) {
+      if (entering.contains(target.id)) expect(target.hittable, isFalse);
+    }
+  });
+
+  test('an arriving fish finishes the crossing and joins the pond', () {
+    // The entry state suspends the wall bounce, so a fish that never completed
+    // the crossing would drift away and leave the pond a target short forever.
+    final game = FishGame(random: math.Random(3));
+    game.difficulty = 1;
+    game.update(step, screen);
+    game.difficulty = 0;
+
+    for (var frame = 0; frame < 40 * 10; frame++) {
+      game.update(step, screen);
+    }
+
+    expect(game.views, hasLength(7));
+    for (final fish in game.views) {
+      expect(fish.entering, isFalse, reason: 'ten seconds is long enough');
+    }
   });
 
   test('fish ids are never reused', () {

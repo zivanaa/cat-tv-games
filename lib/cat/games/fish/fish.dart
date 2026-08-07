@@ -22,6 +22,43 @@ Offset randomSpawn(Size screen, double radius, math.Random random) {
   return Offset(axis(screen.width), axis(screen.height));
 }
 
+/// Where a fish joining an already-running pond starts, and the way it faces.
+///
+/// Just outside one edge, pointing in. A fish that is needed mid-session used
+/// to be placed at a random point in open water, which meant it appeared out of
+/// nothing in the middle of a screen a cat was watching. docs/CAT_UX.md rules
+/// out teleporting a target from edge to edge because it breaks tracking;
+/// materialising in clear water is the same break without even the excuse of
+/// having been somewhere first.
+({Offset at, double heading}) edgeEntry(
+  Size screen,
+  double radius,
+  math.Random random,
+) {
+  final margin = radius * 1.3;
+  // A spread rather than straight in, so arrivals do not all cross the pond on
+  // the same rail.
+  final skew = (random.nextDouble() - 0.5) * 1.1;
+  return switch (random.nextInt(4)) {
+    0 => (
+        at: Offset(-margin, random.nextDouble() * screen.height),
+        heading: skew,
+      ),
+    1 => (
+        at: Offset(screen.width + margin, random.nextDouble() * screen.height),
+        heading: math.pi + skew,
+      ),
+    2 => (
+        at: Offset(random.nextDouble() * screen.width, -margin),
+        heading: math.pi / 2 + skew,
+      ),
+    _ => (
+        at: Offset(random.nextDouble() * screen.width, screen.height + margin),
+        heading: -math.pi / 2 + skew,
+      ),
+  };
+}
+
 /// Everything the render layer needs about one fish, and nothing it could use
 /// to change one.
 ///
@@ -38,6 +75,7 @@ class FishView {
     required this.facing,
     required this.wag,
     required this.darting,
+    required this.entering,
     required this.caughtProgress,
   });
 
@@ -54,6 +92,9 @@ class FishView {
 
   final bool darting;
 
+  /// Still crossing in from outside the pond, and not yet hittable.
+  final bool entering;
+
   /// 1.0 the instant it is caught, falling to 0 as it respawns. 0 when swimming.
   final double caughtProgress;
 }
@@ -68,8 +109,13 @@ class Fish {
     required this.position,
     required this.speed,
     required this.radius,
+    double heading = 0,
+    bool entering = false,
     math.Random? random,
-  }) : _random = random ?? math.Random();
+  })  : _heading = heading,
+        _course = heading,
+        _entering = entering,
+        _random = random ?? math.Random();
 
   final int id;
   final FishSpecies species;
@@ -83,9 +129,20 @@ class Fish {
   static const _caughtDuration = Duration(milliseconds: 900);
 
   double _phase = 0;
-  double _heading = 0;
-  double _course = 0;
+  double _heading;
+  double _course;
   double _dartLeft = 0;
+
+  /// Still swimming in from outside the pond. The wall bounce is suspended
+  /// until it is fully inside, or the fish would be clamped flat against the
+  /// edge it is entering through on its very first frame.
+  bool _entering;
+  double _enteringFor = 0;
+
+  /// After this it is placed inside and told to get on with it. A fish whose
+  /// wander happened to turn it around while entering would otherwise drift
+  /// away from the pond and never come back.
+  static const _enteringTimeout = 4.0;
 
   /// Which way the slow heading drift is currently turning.
   double _drift = 1;
@@ -94,8 +151,15 @@ class Fish {
   Duration _caughtFor = Duration.zero;
 
   bool get isCaught => _caughtFor > Duration.zero;
-  bool get hittable => !isCaught;
   bool get isDarting => _dartLeft > 0;
+
+  /// Still on its way in from the edge.
+  bool get isEntering => _entering;
+
+  /// Not while it is half off the screen. A target a cat cannot fully see is
+  /// one it cannot fairly be asked to hit, and PawInput's assist would happily
+  /// award a fish whose centre is still outside the pond.
+  bool get hittable => !isCaught && !_entering;
 
   FishView get view => FishView(
         id: id,
@@ -105,6 +169,7 @@ class Fish {
         facing: _course,
         wag: _phase,
         darting: isDarting,
+        entering: _entering,
         caughtProgress: isCaught
             ? _caughtFor.inMicroseconds / _caughtDuration.inMicroseconds
             : 0,
@@ -132,6 +197,12 @@ class Fish {
       math.cos(course) * speedNow * dt,
       math.sin(course) * speedNow * dt,
     );
+
+    if (_entering) {
+      _course = course;
+      _advanceEntry(dt, screen);
+      return;
+    }
 
     // Bounce off the edges rather than wrapping — a fish vanishing at one edge
     // and reappearing at the other breaks a cat's tracking.
@@ -167,6 +238,30 @@ class Fish {
     _course = course;
   }
 
+  /// Runs while a fish is still crossing in from outside. The bounce stays off
+  /// until it is fully inside, then it becomes an ordinary fish.
+  void _advanceEntry(double dt, Size screen) {
+    _enteringFor += dt;
+    final inside = position.dx >= radius &&
+        position.dx <= screen.width - radius &&
+        position.dy >= radius &&
+        position.dy <= screen.height - radius;
+
+    if (inside) {
+      _entering = false;
+      return;
+    }
+    if (_enteringFor >= _enteringTimeout) {
+      // Gave up on swimming in. Better a fish that is simply there than one
+      // that wandered off and left the pond a target short.
+      position = Offset(
+        position.dx.clamp(radius, screen.width - radius).toDouble(),
+        position.dy.clamp(radius, screen.height - radius).toDouble(),
+      );
+      _entering = false;
+    }
+  }
+
   /// Darts are rationed. They are the most arresting thing a target does, and a
   /// pond where everything is darting is the fast random motion that CAT_UX.md
   /// says loses cats.
@@ -196,10 +291,16 @@ class Fish {
   /// Caught. Stays gone briefly so the cat registers cause and effect.
   void catchIt() => _caughtFor = _caughtDuration;
 
+  /// A caught fish comes back by swimming in from an edge rather than blinking
+  /// into open water. It was gone for 900ms and the cat watched it go; having
+  /// it reappear mid-pond is the tracking break all over again.
   void _respawn(Size screen) {
-    position = randomSpawn(screen, radius, _random);
-    _heading = _random.nextDouble() * math.pi * 2;
-    _course = _heading;
+    final entry = edgeEntry(screen, radius, _random);
+    position = entry.at;
+    _heading = entry.heading;
+    _course = entry.heading;
+    _entering = true;
+    _enteringFor = 0;
     // Start the sine over so the fish leaves on the heading it was given.
     _phase = 0;
     _dartLeft = 0;

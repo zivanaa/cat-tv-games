@@ -54,9 +54,20 @@ class FishGame implements CatGame {
   double get _speed => 40 + _difficulty * 150;
   double get _radius => 60 - _difficulty * 24;
 
-  /// Rounding puts the step boundaries at 0.125, 0.375, 0.625 and 0.875, so the
-  /// pond gains a fish four times across the ladder instead of three.
-  int get _count => 3 + (_difficulty * 4).round();
+  /// Fewer fish as the pond gets harder, which is the opposite of what this
+  /// used to do.
+  ///
+  /// It read `3 + difficulty * 4`, so a cat that was missing everything was
+  /// given the emptiest pond — three targets — while a cat already scoring got
+  /// seven. Every extra fish is another chance to land something, so the count
+  /// was working directly against the speed and size either side of it, both of
+  /// which correctly ease off for a struggling cat. The comment above them says
+  /// slower and bigger when the cat is struggling; this now says more of them
+  /// too.
+  ///
+  /// Seven is a busy pond, not a crowded one. CAT_UX.md warns that noise loses
+  /// cats, so the easy end adds targets rather than adding speed.
+  int get _count => 7 - (_difficulty * 4).round();
 
   /// A read-only snapshot for the render layer. Kept separate from [targets],
   /// which is the input contract and deliberately knows nothing about how a
@@ -120,13 +131,17 @@ class FishGame implements CatGame {
   /// the setter because a new fish needs somewhere to spawn and only the caller
   /// knows the screen.
   ///
-  /// Growing is immediate — an appearing fish looks like an ordinary respawn.
+  /// Growing swims the new fish in from an edge. It used to place it at a
+  /// random point in open water, so easing the difficulty made a fish appear
+  /// out of nothing in the middle of a screen the cat was watching — the same
+  /// tracking break CAT_UX.md rules out for edge-to-edge wrapping, minus the
+  /// excuse of having been somewhere first.
+  ///
   /// Shrinking only ever retires a fish that is already caught and off screen.
-  /// Deleting one mid-swim would blink a target out from under a watching cat,
-  /// which is the tracking break CAT_UX.md rules out.
+  /// Deleting one mid-swim would blink a target out from under a watching cat.
   void _reconcileCount(Size screen) {
     while (_fish.length < _count) {
-      _fish.add(_spawn(screen));
+      _fish.add(_spawn(screen, entering: true));
     }
     var surplus = _fish.length - _count;
     if (surplus <= 0) return;
@@ -137,13 +152,20 @@ class FishGame implements CatGame {
     });
   }
 
-  Fish _spawn(Size screen) {
+  /// [entering] fish start outside the pond and swim in. The pond's opening
+  /// cast does not: at the first frame there is nothing on screen for a cat to
+  /// lose track of, and making it watch an empty pond fill up would waste the
+  /// few seconds where its attention is easiest to win.
+  Fish _spawn(Size screen, {bool entering = false}) {
     final species = _pickSpecies();
     final radius = _radius * species.sizeScale;
+    final entry = entering ? edgeEntry(screen, radius, _random) : null;
     return Fish(
       id: _nextId++,
       species: species,
-      position: randomSpawn(screen, radius, _random),
+      position: entry?.at ?? randomSpawn(screen, radius, _random),
+      heading: entry?.heading ?? _random.nextDouble() * math.pi * 2,
+      entering: entering,
       speed: _speed,
       radius: radius,
       random: _random,
