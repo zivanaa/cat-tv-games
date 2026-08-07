@@ -7,7 +7,9 @@ import 'package:flame/game.dart';
 import '../audio/cat_audio.dart';
 import '../audio/cat_sound.dart';
 import '../audio/sound_policy.dart';
+import '../engine/cat_game.dart';
 import '../engine/paw_input.dart';
+import '../session/session_clock.dart';
 import '../games/fish/fish.dart';
 import '../games/fish/fish_game.dart';
 import '../games/fish/fish_species.dart';
@@ -24,16 +26,22 @@ class FishPondGame extends FlameGame {
     PawInput? input,
     CatAudio? audio,
     SoundPolicy? sound,
+    SessionClock? clock,
+    SessionLimits limits = const SessionLimits(),
     math.Random? random,
   })  : rules = rules ?? FishGame(random: random),
         input = input ?? PawInput(),
         audio = audio ?? SilentCatAudio(),
-        sound = sound ?? SoundPolicy(random: random);
+        sound = sound ?? SoundPolicy(random: random),
+        clock = clock ?? SessionClock(limits: limits);
 
   final FishGame rules;
   final PawInput input;
   final CatAudio audio;
   final SoundPolicy sound;
+  final SessionClock clock;
+
+  SessionPhase _lastPhase = SessionPhase.playing;
 
   final List<_Splash> _splashes = [];
 
@@ -63,7 +71,25 @@ class FishPondGame extends FlameGame {
   @override
   void update(double dt) {
     super.update(dt);
-    rules.update(dt, size.toSize());
+    clock.advance(dt);
+
+    if (clock.phase != _lastPhase) {
+      _lastPhase = clock.phase;
+      if (_lastPhase == SessionPhase.windingDown) {
+        _speak(CatSound.windDown, volume: 0.7);
+      }
+    }
+
+    // Once the session is over there is nothing on screen but the scrim, so
+    // there is nothing worth simulating either. Fifteen minutes of full-screen
+    // animation is exactly the load CAT_UX.md says throttles a phone lying on a
+    // rug; the least this can do is stop drawing heat at the end of it.
+    if (clock.phase == SessionPhase.ended) return;
+
+    // Slowing simulated time rather than each fish's speed settles the whole
+    // pond together — darts, respawns and drifts all ease off in step.
+    rules.update(dt * clock.pace, size.toSize());
+
     for (final splash in _splashes) {
       splash.age += dt;
     }
@@ -71,7 +97,9 @@ class FishPondGame extends FlameGame {
 
     _quietFor += dt;
     _voiceDarts();
-    if (_quietFor >= _chirpAfterQuiet) _speak(CatSound.chirp, volume: 0.5);
+    if (_quietFor >= _chirpAfterQuiet && clock.phase == SessionPhase.playing) {
+      _speak(CatSound.chirp, volume: 0.5);
+    }
   }
 
   /// A rustle on the frame a fish breaks into a dart. The sound is the point of
@@ -97,6 +125,13 @@ class FishPondGame extends FlameGame {
   /// the screen is a glancing contact and waiting for a clean tap loses most of
   /// them (docs/CAT_UX.md).
   PawHit contact(Offset point, DateTime now) {
+    // The session is over. Nothing is on screen, so nothing can be caught, and
+    // scoring against an empty dark pond would quietly corrupt the stats the
+    // owner reads.
+    if (clock.phase == SessionPhase.ended) {
+      return PawHit(tier: HitTier.miss, point: point);
+    }
+
     final hit = input.resolve(
       point: point,
       targets: rules.targets,
@@ -140,6 +175,19 @@ class FishPondGame extends FlameGame {
     }
     for (final splash in _splashes) {
       _renderSplash(canvas, splash);
+    }
+
+    // The light going down, drawn over the finished scene rather than folded
+    // into each fish's own alpha.
+    //
+    // That distinction is the whole reason this works. Fading a warm fish
+    // against cold water composites it to olive — that mistake is documented on
+    // the catch animation above. A scrim moves the fish and the water toward
+    // the same colour at the same rate, so it reads as a room going dark
+    // instead of everything turning the wrong hue on the way out.
+    final dim = clock.windDownProgress;
+    if (dim > 0) {
+      canvas.drawRect(bounds, Paint()..color = _deep.withValues(alpha: dim));
     }
   }
 
