@@ -65,6 +65,20 @@ class FishPondGame extends FlameGame {
   static const _deep = Color(0xFF04121F);
   static const _shallow = Color(0xFF0B3A5C);
 
+  /// Dappled sunlight on the water, and the weed under it.
+  ///
+  /// Both are deliberately low contrast. The pond has to look alive — a still
+  /// image loses a cat — but every one of these is scenery competing with the
+  /// only thing that matters on the screen, and contrast is what a cat actually
+  /// resolves. The fish stay the brightest objects in the frame by some margin,
+  /// which is why the caustics sit near 0.09 alpha and the pads are barely
+  /// above the water they float on.
+  static const _caustic = Color(0xFF6FD8FF);
+  static const _pad = Color(0xFF0E3F52);
+
+  /// Seconds since the session started, for anything that moves on its own.
+  double _time = 0;
+
   @override
   Color backgroundColor() => _deep;
 
@@ -87,7 +101,9 @@ class FishPondGame extends FlameGame {
     if (clock.phase == SessionPhase.ended) return;
 
     // Slowing simulated time rather than each fish's speed settles the whole
-    // pond together — darts, respawns and drifts all ease off in step.
+    // pond together — darts, respawns and drifts all ease off in step. The
+    // water slows with them, so the light stops swimming as the session closes.
+    _time += dt * clock.pace;
     rules.update(dt * clock.pace, size.toSize());
 
     for (final splash in _splashes) {
@@ -157,18 +173,7 @@ class FishPondGame extends FlameGame {
     super.render(canvas);
     final bounds = Offset.zero & size.toSize();
 
-    // A pool of light in the middle so the pond is not a flat field of one
-    // colour. Motion holds attention, but contrast is what makes a fish legible
-    // against the water in the first place.
-    canvas.drawRect(
-      bounds,
-      Paint()
-        ..shader = Gradient.radial(
-          bounds.center,
-          bounds.longestSide * 0.7,
-          const [_shallow, _deep],
-        ),
-    );
+    _renderWater(canvas, bounds);
 
     for (final fish in rules.views) {
       _renderFish(canvas, fish);
@@ -188,6 +193,123 @@ class FishPondGame extends FlameGame {
     final dim = clock.windDownProgress;
     if (dim > 0) {
       canvas.drawRect(bounds, Paint()..color = _deep.withValues(alpha: dim));
+    }
+  }
+
+  /// The pond itself: a pool of light, weed drifting under it, and sunlight
+  /// broken up on the surface.
+  ///
+  /// The whole budget here is eleven draw calls sharing two shaders. Effects
+  /// have to stay cheap for the same reason the frame rate is meant to be
+  /// capped — half an hour of full-screen animation on a phone lying on a rug
+  /// throttles, and throttling ends a session more reliably than boredom does
+  /// (docs/CAT_UX.md).
+  void _renderWater(Canvas canvas, Rect bounds) {
+    // The pool of light drifts, so the pond is never quite the same shape
+    // twice. Slowly — this is depth, not something to look at.
+    final drift = Offset(
+      math.sin(_time * 0.06) * bounds.width * 0.12,
+      math.cos(_time * 0.045) * bounds.height * 0.12,
+    );
+    canvas.drawRect(
+      bounds,
+      Paint()
+        ..shader = Gradient.radial(
+          bounds.center + drift,
+          bounds.longestSide * 0.72,
+          const [_shallow, _deep],
+        ),
+    );
+
+    _renderPads(canvas, bounds);
+    _renderCaustics(canvas, bounds);
+  }
+
+  /// Lily pads, seen from above like everything else in the pond.
+  ///
+  /// They turn and drift far too slowly to be mistaken for prey, which is the
+  /// point: a decoy that never rewards a swipe teaches a cat that some moving
+  /// things do not answer, and that is the lesson this app can least afford.
+  void _renderPads(Canvas canvas, Rect bounds) {
+    // Low alpha and a narrow notch, both after looking at the first attempt.
+    // At 0.55 with a wide wedge they read as flat dark cut-outs punched in the
+    // water — high enough contrast to pull the eye off the fish, which is the
+    // one thing scenery here must not do.
+    final body = Paint()..color = _pad.withValues(alpha: 0.32);
+    final rim = Paint()
+      ..style = PaintingStyle.stroke
+      ..color = _caustic.withValues(alpha: 0.05);
+
+    for (var i = 0; i < 3; i++) {
+      final seed = i * 2.4;
+      final radius = bounds.shortestSide * (0.1 + 0.03 * math.sin(seed));
+      rim.strokeWidth = radius * 0.09;
+
+      // Kept off the middle. The centre is where the pool of light is and where
+      // fish are most legible, so the pads sit around the outside of it.
+      final at = Offset(
+        bounds.width * (0.16 + 0.34 * i) +
+            math.sin(_time * 0.05 + seed) * bounds.width * 0.025,
+        bounds.height * (i.isEven ? 0.19 : 0.82) +
+            math.cos(_time * 0.04 + seed) * bounds.height * 0.035,
+      );
+
+      canvas
+        ..save()
+        ..translate(at.dx, at.dy)
+        ..rotate(_time * 0.03 + seed);
+
+      // A disc with a wedge cut out, which is the one silhouette that reads as
+      // a lily pad rather than a stone.
+      final pad = Path()
+        ..moveTo(0, 0)
+        ..arcTo(
+          Rect.fromCircle(center: Offset.zero, radius: radius),
+          0.25,
+          math.pi * 2 - 0.5,
+          false,
+        )
+        ..close();
+
+      // The rim is what stops it reading as a hole. A surface catches light at
+      // its edge; a hole does not.
+      canvas
+        ..drawPath(pad, body)
+        ..drawPath(pad, rim)
+        ..restore();
+    }
+  }
+
+  /// Sunlight broken up by the surface.
+  ///
+  /// One radial shader built for a unit circle at the origin and then moved and
+  /// scaled by the canvas for each patch, rather than a shader per patch per
+  /// frame. Soft edges without paying for a blur, which is the expensive way to
+  /// get the same look.
+  void _renderCaustics(Canvas canvas, Rect bounds) {
+    final glow = Paint()
+      ..shader = Gradient.radial(Offset.zero, 1, [
+        _caustic.withValues(alpha: 0.09),
+        _caustic.withValues(alpha: 0),
+      ]);
+
+    for (var i = 0; i < 6; i++) {
+      final seed = i * 1.9;
+      final at = Offset(
+        bounds.width * (0.5 + 0.42 * math.sin(_time * 0.11 + seed)),
+        bounds.height * (0.5 + 0.42 * math.cos(_time * 0.083 + seed * 1.3)),
+      );
+      final rx =
+          bounds.shortestSide * (0.3 + 0.12 * math.sin(_time * 0.2 + seed));
+      final ry = rx * (0.42 + 0.12 * math.cos(_time * 0.17 + seed));
+
+      canvas
+        ..save()
+        ..translate(at.dx, at.dy)
+        ..rotate(math.sin(_time * 0.05 + seed) * 0.8)
+        ..scale(rx, ry)
+        ..drawCircle(Offset.zero, 1, glow)
+        ..restore();
     }
   }
 
