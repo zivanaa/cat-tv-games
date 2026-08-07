@@ -59,22 +59,30 @@ class FishPondGame extends FlameGame {
   /// has wandered off mid-session.
   static const _chirpAfterQuiet = 7.0;
 
-  /// Deep water. Blues and yellows are what a dichromatic eye reads strongly;
-  /// docs/CAT_UX.md rules out building a theme around red, so the whole palette
-  /// below sits in the blue-cyan-gold range and never leans on it.
-  static const _deep = Color(0xFF04121F);
-  static const _shallow = Color(0xFF0B3A5C);
-
-  /// Dappled sunlight on the water, and the weed under it.
+  /// The pond, from the lit middle out to the deep edge.
   ///
-  /// Both are deliberately low contrast. The pond has to look alive — a still
-  /// image loses a cat — but every one of these is scenery competing with the
-  /// only thing that matters on the screen, and contrast is what a cat actually
-  /// resolves. The fish stay the brightest objects in the frame by some margin,
-  /// which is why the caustics sit near 0.09 alpha and the pads are barely
-  /// above the water they float on.
-  static const _caustic = Color(0xFF6FD8FF);
-  static const _pad = Color(0xFF0E3F52);
+  /// The first pass was near enough one colour, because "do not compete with
+  /// the fish" got read as "stay dark". That conflated two different things.
+  /// What a cat resolves is luminance, not hue, so the water can carry real
+  /// colour as long as it stays well below the fish in brightness — and blue
+  /// and blue-green are exactly the range a dichromatic eye reads strongly.
+  ///
+  /// The margin is still there and it is wide: this teal sits around 0.37
+  /// relative luminance against roughly 0.82 for the gold fish and 0.84 for the
+  /// cyan darter. The fish remain the brightest things on screen by a distance,
+  /// which is the rule that actually matters.
+  static const _deep = Color(0xFF04182B);
+  static const _mid = Color(0xFF0D4468);
+  static const _lit = Color(0xFF1C7A96);
+
+  /// Two slow colour washes that keep the pond from being one flat field.
+  /// Green-water in one corner, cold depth in another, both drifting.
+  static const _weedWash = Color(0xFF0E8C7A);
+  static const _duskWash = Color(0xFF2B3A8F);
+
+  /// Dappled sunlight on the surface, and the lily pads under it.
+  static const _caustic = Color(0xFFA8F0FF);
+  static const _pad = Color(0xFF0B6157);
 
   /// Seconds since the session started, for anything that moves on its own.
   double _time = 0;
@@ -216,13 +224,51 @@ class FishPondGame extends FlameGame {
       Paint()
         ..shader = Gradient.radial(
           bounds.center + drift,
-          bounds.longestSide * 0.72,
-          const [_shallow, _deep],
+          bounds.longestSide * 0.78,
+          const [_lit, _mid, _deep],
+          const [0, 0.42, 1],
         ),
     );
 
+    // Green water on one side, cold depth on the other, both wandering. Two
+    // draws is what turns a single radial ramp into a pond that has places in
+    // it rather than a middle and an outside.
+    _renderWash(canvas, bounds, _weedWash, 0.16, 0.7, phase: 0);
+    _renderWash(canvas, bounds, _duskWash, 0.2, 0.85, phase: 2.6);
+
     _renderPads(canvas, bounds);
     _renderCaustics(canvas, bounds);
+  }
+
+  /// A slow, very large patch of colour drifting across the pond.
+  void _renderWash(
+    Canvas canvas,
+    Rect bounds,
+    Color colour,
+    double alpha,
+    double size, {
+    required double phase,
+  }) {
+    final at = Offset(
+      bounds.width * (0.5 + 0.36 * math.sin(_time * 0.035 + phase)),
+      bounds.height * (0.5 + 0.36 * math.cos(_time * 0.028 + phase * 1.4)),
+    );
+    final radius = bounds.longestSide * size;
+
+    canvas
+      ..save()
+      ..translate(at.dx, at.dy)
+      ..scale(radius, radius * 0.72)
+      ..drawCircle(
+        Offset.zero,
+        1,
+        Paint()
+          ..shader = Gradient.radial(Offset.zero, 1, [
+            colour.withValues(alpha: alpha),
+            colour.withValues(alpha: 0),
+          ]),
+      )
+      ..restore();
   }
 
   /// Lily pads, seen from above like everything else in the pond.
@@ -231,14 +277,14 @@ class FishPondGame extends FlameGame {
   /// point: a decoy that never rewards a swipe teaches a cat that some moving
   /// things do not answer, and that is the lesson this app can least afford.
   void _renderPads(Canvas canvas, Rect bounds) {
-    // Low alpha and a narrow notch, both after looking at the first attempt.
-    // At 0.55 with a wide wedge they read as flat dark cut-outs punched in the
-    // water — high enough contrast to pull the eye off the fish, which is the
-    // one thing scenery here must not do.
-    final body = Paint()..color = _pad.withValues(alpha: 0.32);
+    // A narrow notch, after the first attempt's wide wedge read as a hole
+    // punched in the water rather than a leaf floating on it. The alpha came
+    // back up once the water underneath had real colour to sit against — at
+    // 0.32 over a near-black pond they had vanished entirely.
+    final body = Paint()..color = _pad.withValues(alpha: 0.5);
     final rim = Paint()
       ..style = PaintingStyle.stroke
-      ..color = _caustic.withValues(alpha: 0.05);
+      ..color = _caustic.withValues(alpha: 0.1);
 
     for (var i = 0; i < 3; i++) {
       final seed = i * 2.4;
@@ -289,7 +335,7 @@ class FishPondGame extends FlameGame {
   void _renderCaustics(Canvas canvas, Rect bounds) {
     final glow = Paint()
       ..shader = Gradient.radial(Offset.zero, 1, [
-        _caustic.withValues(alpha: 0.09),
+        _caustic.withValues(alpha: 0.13),
         _caustic.withValues(alpha: 0),
       ]);
 
