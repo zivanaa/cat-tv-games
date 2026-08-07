@@ -62,6 +62,29 @@ class PawInputConfig {
   /// are one bat, not two taps.
   final Duration debounce;
 
+  /// The assist that belongs with a given difficulty, 0 to 1.
+  ///
+  /// Without this the ladder has no teeth. Raising difficulty only ever made
+  /// fish faster and smaller, and since hit testing floors every target at
+  /// [minTargetRadius] and the assist radius is derived from that floor, the
+  /// reach a cat actually had never changed. A simulated cat missing by 90px
+  /// landed every single contact at difficulty 1.0 exactly as it did at 0.4, so
+  /// the ladder climbed to the top and stayed there for everyone.
+  ///
+  /// Tightening the assist as the cat climbs is what closes the loop, and it is
+  /// what docs/CAT_UX.md asks for: more reach for kittens and senior cats, less
+  /// for a cat that is already scoring. The generous tier stays wider than the
+  /// assist radius at every rung — `paw_input_test.dart` pins that, because a
+  /// generous reach that falls inside the assist radius silently disables the
+  /// tier and nothing else would fail.
+  factory PawInputConfig.forDifficulty(double difficulty) {
+    final d = difficulty.clamp(0.0, 1.0).toDouble();
+    return PawInputConfig(
+      assistMultiplier: 2.9 - d * 1.45,
+      generosity: 0.5 - d * 0.3,
+    );
+  }
+
   /// Easier variant for a cat that is not connecting.
   PawInputConfig get moreForgiving => PawInputConfig(
         minTargetRadius: minTargetRadius * 1.25,

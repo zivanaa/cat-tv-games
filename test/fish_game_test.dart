@@ -124,23 +124,23 @@ void main() {
     // changed how the fish swam and never how many there were.
     final game = FishGame(random: math.Random(7));
     game.update(step, screen);
-    expect(game.targets.length, 4, reason: 'difficulty starts at 0.4');
+    expect(game.targets.length, 5, reason: 'difficulty starts at 0.4');
 
     game.difficulty = 1.0;
     game.update(step, screen);
-    expect(game.targets.length, 6);
+    expect(game.targets.length, 7);
   });
 
   test('shrinking the pond never removes a fish mid-swim', () {
     final game = FishGame(random: math.Random(7));
     game.difficulty = 1.0;
     game.update(step, screen);
-    expect(game.targets.length, 6);
+    expect(game.targets.length, 7);
 
     // Wants three, but every fish is on screen and being tracked.
     game.difficulty = 0.0;
     game.update(step, screen);
-    expect(game.targets.length, 6);
+    expect(game.targets.length, 7);
   });
 
   test('the pond shrinks by retiring fish that are already caught', () {
@@ -153,7 +153,7 @@ void main() {
     game.difficulty = 0.0;
     game.update(step, screen);
 
-    expect(game.targets.length, 5);
+    expect(game.targets.length, 6);
     expect(game.targets.any((t) => t.id == caught.id), isFalse);
   });
 

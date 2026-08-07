@@ -44,9 +44,19 @@ class FishGame implements CatGame {
   }
 
   // Slower and bigger when the cat is struggling.
-  double get _speed => 40 + _difficulty * 90;
-  double get _radius => 56 - _difficulty * 16;
-  int get _count => 3 + (_difficulty * 3).round();
+  //
+  // The spreads were narrower and a level barely registered: speed moved 40 to
+  // 130 and size 56 to 40, so a step up the ladder changed the pond by a few
+  // pixels per second. These are wide enough that a single step is visible
+  // while the extremes stay inside what CAT_UX.md allows — 190px/s is still a
+  // trackable target rather than the fast random motion that loses cats, and
+  // the smallest fish is still floored to minTargetRadius for hit testing.
+  double get _speed => 40 + _difficulty * 150;
+  double get _radius => 60 - _difficulty * 24;
+
+  /// Rounding puts the step boundaries at 0.125, 0.375, 0.625 and 0.875, so the
+  /// pond gains a fish four times across the ladder instead of three.
+  int get _count => 3 + (_difficulty * 4).round();
 
   /// A read-only snapshot for the render layer. Kept separate from [targets],
   /// which is the input contract and deliberately knows nothing about how a

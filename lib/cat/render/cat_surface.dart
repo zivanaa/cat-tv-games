@@ -2,6 +2,7 @@ import 'package:flame/game.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../shared/widgets/exit_guard.dart';
+import '../engine/paw_input.dart';
 import '../session/session_recorder.dart';
 import 'fish_pond_game.dart';
 
@@ -37,9 +38,13 @@ class _CatSurfaceState extends State<CatSurface> {
     // The game gets easier when the cat is not connecting, never harder to be
     // "fair". A session that ends on a score of zero is the failure mode the
     // whole input design exists to avoid.
-    _game.rules.difficulty = _session.suggestedDifficulty(
-      _game.rules.difficulty,
-    );
+    final next = _session.suggestedDifficulty(_game.rules.difficulty);
+    if (next != _game.rules.difficulty) {
+      _game.rules.difficulty = next;
+      // The assist moves with the ladder. Speed and size alone do not make a
+      // level harder while every target is floored to the same hit radius.
+      _game.input.config = PawInputConfig.forDifficulty(next);
+    }
   }
 
   @override

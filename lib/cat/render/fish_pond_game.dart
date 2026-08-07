@@ -95,18 +95,12 @@ class FishPondGame extends FlameGame {
 
     // A caught fish darts away small and bright rather than dimming in place.
     //
-    // Fading it out across the full 900ms was the obvious thing and it looked
-    // wrong: gold at low alpha over blue water turns olive, so a caught fish
-    // spent most of a second as a muddy smear rather than reading as gone. It
-    // now shrinks away over the first quarter of that window while staying
-    // bright, and is simply absent for the rest — which is also the clearer
-    // cause-and-effect signal for the cat that just hit it.
     // Note there is no alpha fade here at all, and that is the fix rather than
     // an omission. Any partial alpha composites a warm fish into the cold water
     // behind it and lands on olive, so fading was tried twice — over the whole
     // 900ms, then over a quarter of it — and read as mud both times. Shrinking
-    // at full opacity keeps the colour honest for every frame it is visible.
-    const opacity = 1.0;
+    // at full opacity keeps the colour honest for every frame it is visible,
+    // and is the clearer cause-and-effect signal for the cat that just hit it.
     var scale = 1.0;
     if (fish.caughtProgress > 0) {
       const vanishOver = 0.25;
@@ -125,114 +119,156 @@ class FishPondGame extends FlameGame {
     // sprite being slid across the screen.
     final beat = math.sin(fish.wag * 2.2) * (fish.darting ? 0.55 : 0.32);
 
-    final body = Paint()..color = palette.body.withValues(alpha: opacity);
-    final fin = Paint()..color = palette.fin.withValues(alpha: opacity * 0.95);
-    final accent = Paint()
-      ..color = palette.accent.withValues(alpha: opacity * 0.9);
+    final body = Paint()..color = palette.body;
+    final fin = Paint()..color = palette.fin;
+    final accent = Paint()..color = palette.accent;
+
+    // Semi-axes of the body. Everything else is positioned from these so the
+    // parts cannot drift apart when a species changes proportion.
+    final a = r * shape.length / 2;
+    final b = r * shape.height / 2;
 
     canvas
       ..save()
       ..translate(fish.position.dx, fish.position.dy)
       ..rotate(fish.facing);
 
-    if (fish.darting) _renderWake(canvas, r, opacity, palette);
+    if (fish.darting) _renderWake(canvas, r, palette);
 
-    _renderTail(canvas, shape, r, beat, fin);
+    _renderTail(canvas, shape, a, b, beat, fin);
+    _renderFin(canvas, shape.dorsal, a, b, up: true, paint: fin);
+    _renderFin(canvas, shape.ventral, a, b, up: false, paint: fin);
 
-    // Dorsal and ventral fins before the body, so the body edge cuts them
-    // cleanly and the silhouette stays readable at speed.
-    if (shape.dorsal > 0) {
-      canvas.drawPath(
-        Path()
-          ..moveTo(-r * 0.3, -r * shape.height * 0.45)
-          ..lineTo(r * 0.15, -r * shape.height * (0.45 + shape.dorsal))
-          ..lineTo(r * 0.7, -r * shape.height * 0.4)
-          ..close(),
-        fin,
-      );
+    final outline = _bodyPath(a, b);
+    canvas.drawPath(outline, body);
+
+    // Markings are clipped to the body rather than trusted to fit inside it.
+    // Hand-placed circles spill over the edge the moment a proportion changes,
+    // and a blotch hanging off a fish reads as a rendering fault.
+    if (shape.blotches || shape.stripe) {
+      canvas.save();
+      canvas.clipPath(outline);
+      if (shape.blotches) {
+        canvas
+          ..drawCircle(Offset(-a * 0.3, -b * 0.15), b * 0.62, accent)
+          ..drawCircle(Offset(a * 0.35, b * 0.2), b * 0.4, accent);
+      }
+      if (shape.stripe) {
+        canvas.drawOval(
+          Rect.fromCenter(
+            center: Offset(-a * 0.1, 0),
+            width: a * 1.4,
+            height: b * 0.45,
+          ),
+          accent,
+        );
+      }
+      canvas.restore();
     }
-    if (shape.ventral > 0) {
-      canvas.drawPath(
-        Path()
-          ..moveTo(-r * 0.2, r * shape.height * 0.45)
-          ..lineTo(r * 0.1, r * shape.height * (0.45 + shape.ventral))
-          ..lineTo(r * 0.6, r * shape.height * 0.4)
-          ..close(),
-        fin,
-      );
-    }
 
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset.zero,
-        width: r * shape.length,
-        height: r * shape.height,
-      ),
-      body,
+    // A pectoral fin just behind the head. Small, but it is the difference
+    // between a fish and a lozenge with a tail.
+    canvas.drawPath(
+      Path()
+        ..moveTo(a * 0.16, b * 0.2)
+        ..quadraticBezierTo(-a * 0.05, b * 1.05, -a * 0.28, b * 0.5)
+        ..close(),
+      fin,
     );
 
-    // Koi get their blotches, which is what makes them read as koi rather than
-    // as a big goldfish.
-    if (shape.blotches) {
-      canvas
-        ..drawCircle(Offset(-r * 0.35, -r * 0.12), r * 0.34, accent)
-        ..drawCircle(Offset(r * 0.42, r * 0.16), r * 0.22, accent);
-    }
-
-    // A stripe along the flank gives the slimmer species some form.
-    if (shape.stripe) {
-      canvas.drawOval(
-        Rect.fromCenter(
-          center: Offset(-r * 0.1, 0),
-          width: r * shape.length * 0.55,
-          height: r * shape.height * 0.22,
-        ),
-        accent,
-      );
-    }
-
-    final eyeAt = Offset(r * shape.length * 0.29, -r * shape.height * 0.14);
     canvas
       ..drawCircle(
-        eyeAt,
-        r * 0.15,
-        Paint()..color = _deep.withValues(alpha: opacity),
+        Offset(a * 0.55, -b * 0.22),
+        r * 0.14,
+        Paint()..color = _deep,
       )
       ..restore();
   }
 
+  /// The body outline: a rounded belly narrowing to a caudal peduncle, rather
+  /// than the plain oval this started as. The taper is what lets the tail read
+  /// as attached to something instead of stuck onto the back of an egg.
+  Path _bodyPath(double a, double b) => Path()
+    ..moveTo(a, 0)
+    ..cubicTo(a * 0.55, -b, -a * 0.35, -b, -a, -b * 0.16)
+    ..lineTo(-a, b * 0.16)
+    ..cubicTo(-a * 0.35, b, a * 0.55, b, a, 0)
+    ..close();
+
+  /// Half the body's height at [x], from the ellipse the outline follows.
+  ///
+  /// Fins are anchored with this rather than at a fixed fraction of the body
+  /// height, which is what made them float: at the fin's x the body is
+  /// narrower than at the centre, so a fixed offset left a visible gap between
+  /// fin and fish on every species with a tall dorsal.
+  double _edgeAt(double x, double a, double b) {
+    final k = (x / a).clamp(-1.0, 1.0);
+    return b * math.sqrt(1 - k * k);
+  }
+
+  void _renderFin(
+    Canvas canvas,
+    double size,
+    double a,
+    double b, {
+    required bool up,
+    required Paint paint,
+  }) {
+    if (size <= 0) return;
+    final sign = up ? -1.0 : 1.0;
+    final from = -a * 0.42;
+    final to = a * 0.2;
+    // Anchored inside the outline, so the joint is always covered by the body
+    // drawn over it.
+    canvas.drawPath(
+      Path()
+        ..moveTo(from, sign * _edgeAt(from, a, b) * 0.65)
+        ..quadraticBezierTo(
+          -a * 0.15,
+          sign * b * (1 + size),
+          to,
+          sign * _edgeAt(to, a, b) * 0.65,
+        )
+        ..close(),
+      paint,
+    );
+  }
+
+  /// Hinged at the peduncle rather than at the body centre, so the beat swings
+  /// the tail and not the whole fish.
   void _renderTail(
     Canvas canvas,
     _Shape shape,
-    double r,
+    double a,
+    double b,
     double beat,
     Paint fin,
   ) {
-    final root = -r * shape.length * 0.42;
     canvas
       ..save()
-      ..translate(root, 0)
+      // Slightly inside the outline: the body is drawn afterwards and covers
+      // the joint, so there is never a seam.
+      ..translate(-a * 0.92, 0)
       ..rotate(beat);
 
-    final span = r * shape.tail;
+    final span = b * shape.tail;
     if (shape.forked) {
       // Two lobes with a notch, which is what makes a fast fish look fast even
       // while it is cruising.
       canvas.drawPath(
         Path()
-          ..moveTo(0, 0)
-          ..lineTo(-span * 1.2, -span * 0.95)
-          ..lineTo(-span * 0.55, 0)
-          ..lineTo(-span * 1.2, span * 0.95)
+          ..moveTo(a * 0.1, 0)
+          ..lineTo(-span * 1.3, -span * 1.1)
+          ..quadraticBezierTo(-span * 0.5, 0, -span * 1.3, span * 1.1)
           ..close(),
         fin,
       );
     } else {
       canvas.drawPath(
         Path()
-          ..moveTo(0, 0)
-          ..lineTo(-span * 1.15, -span * 0.85)
-          ..lineTo(-span * 1.15, span * 0.85)
+          ..moveTo(a * 0.1, 0)
+          ..lineTo(-span * 1.25, -span * 1.05)
+          ..quadraticBezierTo(-span * 0.95, 0, -span * 1.25, span * 1.05)
           ..close(),
         fin,
       );
@@ -245,14 +281,14 @@ class FishPondGame extends FlameGame {
   ///
   /// It was a round-capped line first, which drew a hard stick poking out of
   /// the tail. A triangle narrowing to a point reads as displaced water.
-  void _renderWake(Canvas canvas, double r, double opacity, _Palette palette) {
+  void _renderWake(Canvas canvas, double r, _Palette palette) {
     canvas.drawPath(
       Path()
         ..moveTo(-r * 1.4, -r * 0.18)
         ..lineTo(-r * 3, 0)
         ..lineTo(-r * 1.4, r * 0.18)
         ..close(),
-      Paint()..color = palette.body.withValues(alpha: opacity * 0.22),
+      Paint()..color = palette.body.withValues(alpha: 0.22),
     );
   }
 
