@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../cat/engine/cat_game.dart';
@@ -36,47 +38,148 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-
     return Scaffold(
       body: DecoratedBox(
         decoration: AppTheme.backdrop,
         child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
-              child: ConstrainedBox(
-                // The app is landscape on a phone and windowed on the web, so
-                // the column is capped rather than stretched across a monitor.
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const _PondMark(),
-                    const SizedBox(height: 26),
-                    Text('Cat TV', style: text.displaySmall),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Games your cat can actually win',
-                      style: text.bodyMedium,
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 34),
-                    const _ModeCard(),
-                    const SizedBox(height: 30),
-                    FilledButton(
-                      onPressed: () => _startSession(context),
-                      child: const Text('Let the cat play'),
-                    ),
-                    const SizedBox(height: 22),
-                    const _ExitHint(),
-                  ],
+          child: LayoutBuilder(
+            builder: (context, box) {
+              // Landscape is not an edge case here, it is the case. main.dart
+              // pins the app to landscapeLeft and landscapeRight, so a phone
+              // running this is roughly 800 by 360 — and the tall column this
+              // screen started as was itself taller than that, which made the
+              // primary orientation the one that scrolled.
+              // Both conditions, and the width one was learned from a test at
+              // 360x300: a squeezed browser window is wide by ratio while
+              // having nowhere near the room for two columns, and splitting it
+              // left each side 118px, which the mode card overflowed.
+              final wide =
+                  box.maxWidth >= 560 && box.maxWidth > box.maxHeight * 1.15;
+
+              // Everything scales off the short side rather than off fixed
+              // numbers, so a 360-tall phone, a tablet and a desktop window all
+              // get proportions instead of one size that only suits a mockup.
+              final short = math.min(box.maxWidth, box.maxHeight);
+              final mark = short.clamp(280.0, 900.0) / 280 * 84;
+
+              return Center(
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: wide ? 40 : 28,
+                    vertical: 24,
+                  ),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: wide ? 780 : 420),
+                    child: wide
+                        ? _WideLayout(mark: mark, onStart: _startSession)
+                        : _TallLayout(mark: mark, onStart: _startSession),
+                  ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Landscape, and the layout the app actually ships in: who we are on the
+/// left, what to do about it on the right.
+class _WideLayout extends StatelessWidget {
+  const _WideLayout({required this.mark, required this.onStart});
+
+  final double mark;
+  final void Function(BuildContext) onStart;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: _Identity(mark: mark, centred: false),
+        ),
+        const SizedBox(width: 44),
+        Expanded(child: _Actions(onStart: onStart, centred: false)),
+      ],
+    );
+  }
+}
+
+/// Portrait: a browser window, a tablet held upright, the web preview.
+class _TallLayout extends StatelessWidget {
+  const _TallLayout({required this.mark, required this.onStart});
+
+  final double mark;
+  final void Function(BuildContext) onStart;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _Identity(mark: mark, centred: true),
+        const SizedBox(height: 34),
+        _Actions(onStart: onStart, centred: true),
+      ],
+    );
+  }
+}
+
+class _Identity extends StatelessWidget {
+  const _Identity({required this.mark, required this.centred});
+
+  final double mark;
+  final bool centred;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment:
+          centred ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+      children: [
+        _PondMark(size: mark),
+        SizedBox(height: mark * 0.28),
+        Text('Cat TV', style: text.displaySmall),
+        const SizedBox(height: 8),
+        Text(
+          'Games your cat can actually win',
+          style: text.bodyMedium,
+          textAlign: centred ? TextAlign.center : TextAlign.start,
+        ),
+      ],
+    );
+  }
+}
+
+class _Actions extends StatelessWidget {
+  const _Actions({required this.onStart, required this.centred});
+
+  final void Function(BuildContext) onStart;
+  final bool centred;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment:
+          centred ? CrossAxisAlignment.center : CrossAxisAlignment.stretch,
+      children: [
+        const _ModeCard(),
+        const SizedBox(height: 26),
+        FilledButton(
+          onPressed: () => onStart(context),
+          child: const Text('Let the cat play'),
+        ),
+        const SizedBox(height: 18),
+        Align(
+          alignment: centred ? Alignment.center : Alignment.centerLeft,
+          child: const _ExitHint(),
+        ),
+      ],
     );
   }
 }
@@ -115,12 +218,20 @@ class _ModeCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Fish pond', style: text.titleMedium),
+                Text(
+                  'Fish pond',
+                  style: text.titleMedium,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 const SizedBox(height: 3),
+                // Ellipsis rather than wrap, so a narrow card loses the end of
+                // a detail line instead of growing a second row and pushing
+                // the button off a short screen.
                 Text(
                   '${FishSpecies.values.length} species · '
                   '${limits.maxDuration.inMinutes} minute session',
                   style: text.bodySmall,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
@@ -134,13 +245,15 @@ class _ModeCard extends StatelessWidget {
 
 /// The badge above the title: a circle of pond with a fish in it.
 class _PondMark extends StatelessWidget {
-  const _PondMark();
+  const _PondMark({required this.size});
+
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 96,
-      height: 96,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: const RadialGradient(
@@ -149,7 +262,7 @@ class _PondMark extends StatelessWidget {
         ),
         border: Border.all(color: AppColours.line, width: 1.5),
       ),
-      child: const Center(child: _Fish(size: 52)),
+      child: Center(child: _Fish(size: size * 0.55)),
     );
   }
 }
