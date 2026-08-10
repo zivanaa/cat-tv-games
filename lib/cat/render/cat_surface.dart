@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flame/game.dart';
 import 'package:flutter/widgets.dart';
 
+import '../../data/models/cat_profile.dart';
 import '../../shared/widgets/exit_guard.dart';
 import '../audio/cat_audio.dart';
 import '../engine/cat_game.dart';
@@ -21,12 +22,21 @@ class CatSurface extends StatefulWidget {
   const CatSurface({
     super.key,
     required this.onExit,
-    this.catId = 'default',
+    required this.profile,
+    this.onSessionEnd,
     this.limits = const SessionLimits(),
   });
 
   final VoidCallback onExit;
-  final String catId;
+
+  /// The cat playing. Its difficulty is where this session starts, rather than
+  /// the middle of the ladder every time, and its generosity sets how much
+  /// reach PawInput gives it.
+  final CatProfile profile;
+
+  /// Called with the profile as the session leaves it, so the climb survives
+  /// the session it happened in.
+  final void Function(CatProfile)? onSessionEnd;
 
   /// How long the session runs and how long it takes to close. Configurable
   /// because the owner will eventually want to set it, and because a fifteen
@@ -45,7 +55,7 @@ class _CatSurfaceState extends State<CatSurface> {
     limits: widget.limits,
   );
   late final SessionRecorder _session = SessionRecorder(
-    catId: widget.catId,
+    catId: widget.profile.id,
     gameId: _game.rules.id,
     startedAt: DateTime.now(),
   );
@@ -53,6 +63,17 @@ class _CatSurfaceState extends State<CatSurface> {
   @override
   void initState() {
     super.initState();
+
+    // The session opens where the cat left off, not in the middle of the
+    // ladder. Without this a cat that spent twenty minutes climbing to 0.9
+    // started again at 0.4 the next time, and the whole adaptive difficulty
+    // only ever meant anything within one sitting.
+    _game.rules.difficulty = widget.profile.difficulty;
+    _game.input.config = PawInputConfig.forDifficulty(
+      widget.profile.difficulty,
+      catGenerosity: widget.profile.generosity,
+    );
+
     // Fire and forget. The pond is playable while the samples land; the only
     // cost of a contact before they do is a missing splash, and blocking the
     // first frame on an audio plugin would be worse.
@@ -61,6 +82,13 @@ class _CatSurfaceState extends State<CatSurface> {
 
   @override
   void dispose() {
+    // Where the cat got to, handed back on the way out. dispose rather than the
+    // exit gesture, because a session can also end by its own clock or by the
+    // route going away, and a climb that only survives one of those three is
+    // worse than one that survives none — it would look like it worked.
+    widget.onSessionEnd?.call(
+      widget.profile.copyWith(difficulty: _game.rules.difficulty),
+    );
     unawaited(_audio.dispose());
     super.dispose();
   }
@@ -88,7 +116,12 @@ class _CatSurfaceState extends State<CatSurface> {
       _game.rules.difficulty = next;
       // The assist moves with the ladder. Speed and size alone do not make a
       // level harder while every target is floored to the same hit radius.
-      _game.input.config = PawInputConfig.forDifficulty(next);
+      // The cat's own generosity rides along, so a kitten stays a kitten as
+      // the pond gets harder.
+      _game.input.config = PawInputConfig.forDifficulty(
+        next,
+        catGenerosity: widget.profile.generosity,
+      );
     }
   }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import '../../cat/engine/cat_game.dart';
 import '../../cat/games/fish/fish_species.dart';
 import '../../cat/render/cat_surface.dart';
 import '../../core/theme/app_theme.dart';
+import '../../data/repositories/cat_profile_repository.dart';
 
 /// Where a person starts a session.
 ///
@@ -16,16 +18,36 @@ import '../../core/theme/app_theme.dart';
 /// Still one game and one hardcoded cat. The mode card is a card rather than
 /// plain text because the moment there are three of them it becomes a picker,
 /// and that is the shape it will be.
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key, this.cats});
 
+  /// Injectable so tests can hand in a cat rather than reaching for whatever
+  /// the app happens to hold. Milestone 2 replaces the default with Isar.
+  final CatProfileRepository? cats;
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
   static const _limits = SessionLimits();
 
-  void _startSession(BuildContext context) {
-    Navigator.of(context).push(
+  late final CatProfileRepository _cats =
+      widget.cats ?? InMemoryCatProfileRepository();
+
+  Future<void> _startSession(BuildContext context) async {
+    final profile = await _cats.current();
+    if (!context.mounted) return;
+
+    await Navigator.of(context).push(
       PageRouteBuilder<void>(
         pageBuilder: (context, animation, secondaryAnimation) => CatSurface(
           limits: _limits,
+          profile: profile,
+          // Where the cat got to goes straight back to the repository, so the
+          // next session starts from the climb rather than from the middle of
+          // the ladder again.
+          onSessionEnd: (played) => unawaited(_cats.save(played)),
           // pop, not maybePop. maybePop asks PopScope for permission, and
           // ExitGuard wraps the surface in PopScope(canPop: false) to block the
           // system back gesture — so the guard was refusing its own exit.

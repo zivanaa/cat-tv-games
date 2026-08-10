@@ -31,12 +31,21 @@ enum HitTier {
 
 class PawInputConfig {
   const PawInputConfig({
-    this.minTargetRadius = 64.0,
+    this.minTargetRadius = defaultMinTargetRadius,
     this.assistMultiplier = 2.5,
     this.generosity = 0.35,
     this.generousCooldown = const Duration(milliseconds: 1200),
     this.debounce = const Duration(milliseconds: 80),
   });
+
+  static const defaultMinTargetRadius = 64.0;
+
+  /// The screen width the generous tier is reasoned about against.
+  ///
+  /// A landscape phone. It only exists so [forDifficulty] can guarantee the
+  /// generous reach lands outside the assist radius without being handed a
+  /// screen — see the floor it computes.
+  static const referenceWidth = 800.0;
 
   /// No target is ever smaller than this for hit-testing purposes, however
   /// small it is drawn. Visual size and hit size are deliberately decoupled.
@@ -77,11 +86,29 @@ class PawInputConfig {
   /// assist radius at every rung — `paw_input_test.dart` pins that, because a
   /// generous reach that falls inside the assist radius silently disables the
   /// tier and nothing else would fail.
-  factory PawInputConfig.forDifficulty(double difficulty) {
+  /// [catGenerosity] is the cat's own assist level, from its profile. Kittens
+  /// and senior cats are given more, a cat that is already scoring less. It was
+  /// documented on CatProfile from the first commit and read by nothing, so
+  /// every cat got the same assist no matter what its profile said.
+  factory PawInputConfig.forDifficulty(
+    double difficulty, {
+    double catGenerosity = 0.35,
+  }) {
     final d = difficulty.clamp(0.0, 1.0).toDouble();
+    final assist = 2.9 - d * 1.45;
+
+    // The floor is the important line here. If the generous reach ever falls
+    // inside the assist radius the tier is silently dead: nothing throws,
+    // nothing logs, cats just quietly score less. It used to hold only because
+    // the two constants happened to be chosen well, and a cat with a low
+    // profile generosity would have broken it. Deriving the minimum from the
+    // assist radius makes it true by construction instead of by luck.
+    final floor = defaultMinTargetRadius * assist / referenceWidth * 1.25;
+    final wanted = (0.5 - d * 0.3) * (catGenerosity.clamp(0.05, 1.0) / 0.35);
+
     return PawInputConfig(
-      assistMultiplier: 2.9 - d * 1.45,
-      generosity: 0.5 - d * 0.3,
+      assistMultiplier: assist,
+      generosity: math.max(floor, wanted),
     );
   }
 
