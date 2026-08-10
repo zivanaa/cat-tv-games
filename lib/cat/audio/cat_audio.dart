@@ -35,8 +35,15 @@ class FlameCatAudio implements CatAudio {
 
   @override
   Future<void> preload() async {
-    await FlameAudio.audioCache.loadAll(_files.values.toList());
-    _ready = true;
+    // A pond that cannot load its samples is a quiet pond, not a broken one.
+    // The same reasoning as play(): there is no error UI on this surface and
+    // nobody watching it, so nothing here may take the session down.
+    try {
+      await FlameAudio.audioCache.loadAll(_files.values.toList());
+      _ready = true;
+    } on Object {
+      _ready = false;
+    }
   }
 
   @override

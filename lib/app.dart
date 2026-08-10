@@ -29,7 +29,13 @@ class HomeScreen extends StatelessWidget {
     Navigator.of(context).push(
       PageRouteBuilder<void>(
         pageBuilder: (context, animation, secondaryAnimation) => CatSurface(
-          onExit: () => Navigator.of(context).maybePop(),
+          // pop, not maybePop. maybePop asks PopScope for permission, and
+          // ExitGuard wraps the surface in PopScope(canPop: false) to block the
+          // system back gesture — so the guard was refusing its own exit. The
+          // hold ring filled, onExit fired, and nothing happened: the cat
+          // surface had no way out at all. This pop is the deliberate human
+          // gesture the PopScope exists to distinguish from a cat's.
+          onExit: () => Navigator.of(context).pop(),
         ),
         transitionDuration: Duration.zero,
       ),
