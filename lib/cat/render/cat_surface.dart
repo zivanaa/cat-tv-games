@@ -8,9 +8,11 @@ import '../../shared/widgets/exit_guard.dart';
 import '../audio/cat_audio.dart';
 import '../engine/cat_game.dart';
 import '../engine/paw_input.dart';
+import '../games/fish/fish_game.dart';
 import '../session/session_clock.dart';
 import '../session/session_recorder.dart';
-import 'fish_pond_game.dart';
+import 'cat_surface_game.dart';
+import 'cat_surface_games.dart';
 
 /// The cat surface. Once this is up, a cat owns the screen.
 ///
@@ -24,6 +26,7 @@ class CatSurface extends StatefulWidget {
     required this.onExit,
     required this.profile,
     this.onSessionEnd,
+    this.mode = FishGame.gameId,
     this.limits = const SessionLimits(),
   });
 
@@ -38,6 +41,11 @@ class CatSurface extends StatefulWidget {
   /// the session it happened in.
   final void Function(CatProfile)? onSessionEnd;
 
+  /// Which mode to play, by its id in `gameCatalog`. An unknown id falls back
+  /// to the pond rather than throwing: this is the surface a cat is left alone
+  /// with, and a crash here is a dead screen nobody is watching.
+  final String mode;
+
   /// How long the session runs and how long it takes to close. Configurable
   /// because the owner will eventually want to set it, and because a fifteen
   /// minute default is unwatchable to develop against — pass a few seconds to
@@ -50,7 +58,8 @@ class CatSurface extends StatefulWidget {
 
 class _CatSurfaceState extends State<CatSurface> {
   final CatAudio _audio = FlameCatAudio();
-  late final FishPondGame _game = FishPondGame(
+  late final CatSurfaceGame<CatGame> _game =
+      (catSurfaceGames[widget.mode] ?? catSurfaceGames[FishGame.gameId]!)(
     audio: _audio,
     limits: widget.limits,
   );

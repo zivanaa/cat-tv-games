@@ -1,18 +1,11 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
-import 'package:flame/extensions.dart';
-import 'package:flame/game.dart';
-
-import '../audio/cat_audio.dart';
 import '../audio/cat_sound.dart';
-import '../audio/sound_policy.dart';
-import '../engine/cat_game.dart';
-import '../engine/paw_input.dart';
-import '../session/session_clock.dart';
 import '../games/fish/fish.dart';
 import '../games/fish/fish_game.dart';
 import '../games/fish/fish_species.dart';
+import 'cat_surface_game.dart';
 
 /// The Flame layer for the fish pond.
 ///
@@ -20,44 +13,20 @@ import '../games/fish/fish_species.dart';
 /// and how hard the game is all live in plain Dart under `lib/cat/engine/` and
 /// `lib/cat/games/`, so they stay testable without a game loop — see CLAUDE.md.
 /// Nothing here decides anything a test would want to assert on.
-class FishPondGame extends FlameGame {
+class FishPondGame extends CatSurfaceGame<FishGame> {
   FishPondGame({
     FishGame? rules,
-    PawInput? input,
-    CatAudio? audio,
-    SoundPolicy? sound,
-    SessionClock? clock,
-    SessionLimits limits = const SessionLimits(),
-    math.Random? random,
-  })  : rules = rules ?? FishGame(random: random),
-        input = input ?? PawInput(),
-        audio = audio ?? SilentCatAudio(),
-        sound = sound ?? SoundPolicy(random: random),
-        clock = clock ?? SessionClock(limits: limits);
-
-  final FishGame rules;
-  final PawInput input;
-  final CatAudio audio;
-  final SoundPolicy sound;
-  final SessionClock clock;
-
-  SessionPhase _lastPhase = SessionPhase.playing;
-
-  final List<_Splash> _splashes = [];
+    super.input,
+    super.audio,
+    super.sound,
+    super.clock,
+    super.limits,
+    super.random,
+  }) : super(rules: rules ?? FishGame(random: random));
 
   /// Which fish were darting last frame, so a dart is noticed as it starts
   /// rather than re-firing for every frame it lasts.
   final Set<Object> _darting = {};
-
-  /// Seconds since the pond last made a noise. Silence is what the ambient
-  /// chirp is for: docs/CAT_UX.md notes that many cats ignore the screen
-  /// entirely until they hear something, so a pond nobody is playing with has
-  /// to speak up on its own.
-  double _quietFor = 0;
-
-  /// Long enough never to compete with play, short enough to catch a cat that
-  /// has wandered off mid-session.
-  static const _chirpAfterQuiet = 7.0;
 
   /// The pond, from the lit middle out to the deep edge.
   ///
@@ -84,123 +53,28 @@ class FishPondGame extends FlameGame {
   static const _caustic = Color(0xFFA8F0FF);
   static const _pad = Color(0xFF0B6157);
 
-  /// Seconds since the session started, for anything that moves on its own.
-  double _time = 0;
-
   @override
-  Color backgroundColor() => _deep;
-
-  @override
-  void update(double dt) {
-    super.update(dt);
-    clock.advance(dt);
-
-    if (clock.phase != _lastPhase) {
-      _lastPhase = clock.phase;
-      if (_lastPhase == SessionPhase.windingDown) {
-        _speak(CatSound.windDown, volume: 0.7);
-      }
-    }
-
-    // Once the session is over there is nothing on screen but the scrim, so
-    // there is nothing worth simulating either. Fifteen minutes of full-screen
-    // animation is exactly the load CAT_UX.md says throttles a phone lying on a
-    // rug; the least this can do is stop drawing heat at the end of it.
-    if (clock.phase == SessionPhase.ended) return;
-
-    // Slowing simulated time rather than each fish's speed settles the whole
-    // pond together — darts, respawns and drifts all ease off in step. The
-    // water slows with them, so the light stops swimming as the session closes.
-    _time += dt * clock.pace;
-    rules.update(dt * clock.pace, size.toSize());
-
-    for (final splash in _splashes) {
-      splash.age += dt;
-    }
-    _splashes.removeWhere((splash) => splash.age >= _Splash.life);
-
-    _quietFor += dt;
-    _voiceDarts();
-    if (_quietFor >= _chirpAfterQuiet && clock.phase == SessionPhase.playing) {
-      _speak(CatSound.chirp, volume: 0.5);
-    }
-  }
+  Color get backdrop => _deep;
 
   /// A rustle on the frame a fish breaks into a dart. The sound is the point of
   /// the dart: a movement a cat may not be looking at becomes one it hears.
-  void _voiceDarts() {
+  @override
+  void updateMode(double dt) {
     for (final fish in rules.views) {
       if (fish.darting) {
-        if (_darting.add(fish.id)) _speak(CatSound.rustle, volume: 0.35);
+        if (_darting.add(fish.id)) speak(CatSound.rustle, volume: 0.35);
       } else {
         _darting.remove(fish.id);
       }
     }
   }
 
-  void _speak(CatSound which, {double volume = 1.0}) {
-    final cue = sound.request(which, DateTime.now(), volume: volume);
-    if (cue == null) return;
-    audio.play(cue);
-    _quietFor = 0;
-  }
-
-  /// A paw landed. Resolved on pointer down rather than tap-up, because a bat at
-  /// the screen is a glancing contact and waiting for a clean tap loses most of
-  /// them (docs/CAT_UX.md).
-  PawHit contact(Offset point, DateTime now) {
-    // The session is over. Nothing is on screen, so nothing can be caught, and
-    // scoring against an empty dark pond would quietly corrupt the stats the
-    // owner reads.
-    if (clock.phase == SessionPhase.ended) {
-      return PawHit(tier: HitTier.miss, point: point);
-    }
-
-    final hit = input.resolve(
-      point: point,
-      targets: rules.targets,
-      screen: size.toSize(),
-      now: now,
-    );
-    rules.onHit(hit);
-    if (hit.scored) {
-      // The splash lands on the fish, not on the paw. An assisted or generous
-      // hit has to look identical to a direct one or the cat learns it missed.
-      _splashes.add(_Splash(hit.target?.center ?? point));
-    }
-    final cue = sound.forHit(hit, now);
-    if (cue != null) {
-      audio.play(cue);
-      _quietFor = 0;
-    }
-    return hit;
-  }
-
   @override
-  void render(Canvas canvas) {
-    super.render(canvas);
-    final bounds = Offset.zero & size.toSize();
-
+  void renderMode(Canvas canvas, Rect bounds) {
     _renderWater(canvas, bounds);
 
     for (final fish in rules.views) {
       _renderFish(canvas, fish);
-    }
-    for (final splash in _splashes) {
-      _renderSplash(canvas, splash);
-    }
-
-    // The light going down, drawn over the finished scene rather than folded
-    // into each fish's own alpha.
-    //
-    // That distinction is the whole reason this works. Fading a warm fish
-    // against cold water composites it to olive — that mistake is documented on
-    // the catch animation above. A scrim moves the fish and the water toward
-    // the same colour at the same rate, so it reads as a room going dark
-    // instead of everything turning the wrong hue on the way out.
-    final dim = clock.windDownProgress;
-    if (dim > 0) {
-      canvas.drawRect(bounds, Paint()..color = _deep.withValues(alpha: dim));
     }
   }
 
@@ -216,8 +90,8 @@ class FishPondGame extends FlameGame {
     // The pool of light drifts, so the pond is never quite the same shape
     // twice. Slowly — this is depth, not something to look at.
     final drift = Offset(
-      math.sin(_time * 0.06) * bounds.width * 0.12,
-      math.cos(_time * 0.045) * bounds.height * 0.12,
+      math.sin(elapsed * 0.06) * bounds.width * 0.12,
+      math.cos(elapsed * 0.045) * bounds.height * 0.12,
     );
     canvas.drawRect(
       bounds,
@@ -250,8 +124,8 @@ class FishPondGame extends FlameGame {
     required double phase,
   }) {
     final at = Offset(
-      bounds.width * (0.5 + 0.36 * math.sin(_time * 0.035 + phase)),
-      bounds.height * (0.5 + 0.36 * math.cos(_time * 0.028 + phase * 1.4)),
+      bounds.width * (0.5 + 0.36 * math.sin(elapsed * 0.035 + phase)),
+      bounds.height * (0.5 + 0.36 * math.cos(elapsed * 0.028 + phase * 1.4)),
     );
     final radius = bounds.longestSide * size;
 
@@ -295,15 +169,15 @@ class FishPondGame extends FlameGame {
       // fish are most legible, so the pads sit around the outside of it.
       final at = Offset(
         bounds.width * (0.16 + 0.34 * i) +
-            math.sin(_time * 0.05 + seed) * bounds.width * 0.025,
+            math.sin(elapsed * 0.05 + seed) * bounds.width * 0.025,
         bounds.height * (i.isEven ? 0.19 : 0.82) +
-            math.cos(_time * 0.04 + seed) * bounds.height * 0.035,
+            math.cos(elapsed * 0.04 + seed) * bounds.height * 0.035,
       );
 
       canvas
         ..save()
         ..translate(at.dx, at.dy)
-        ..rotate(_time * 0.03 + seed);
+        ..rotate(elapsed * 0.03 + seed);
 
       // A disc with a wedge cut out, which is the one silhouette that reads as
       // a lily pad rather than a stone.
@@ -342,17 +216,17 @@ class FishPondGame extends FlameGame {
     for (var i = 0; i < 6; i++) {
       final seed = i * 1.9;
       final at = Offset(
-        bounds.width * (0.5 + 0.42 * math.sin(_time * 0.11 + seed)),
-        bounds.height * (0.5 + 0.42 * math.cos(_time * 0.083 + seed * 1.3)),
+        bounds.width * (0.5 + 0.42 * math.sin(elapsed * 0.11 + seed)),
+        bounds.height * (0.5 + 0.42 * math.cos(elapsed * 0.083 + seed * 1.3)),
       );
       final rx =
-          bounds.shortestSide * (0.3 + 0.12 * math.sin(_time * 0.2 + seed));
-      final ry = rx * (0.42 + 0.12 * math.cos(_time * 0.17 + seed));
+          bounds.shortestSide * (0.3 + 0.12 * math.sin(elapsed * 0.2 + seed));
+      final ry = rx * (0.42 + 0.12 * math.cos(elapsed * 0.17 + seed));
 
       canvas
         ..save()
         ..translate(at.dx, at.dy)
-        ..rotate(math.sin(_time * 0.05 + seed) * 0.8)
+        ..rotate(math.sin(elapsed * 0.05 + seed) * 0.8)
         ..scale(rx, ry)
         ..drawCircle(Offset.zero, 1, glow)
         ..restore();
@@ -561,18 +435,6 @@ class FishPondGame extends FlameGame {
       Paint()..color = palette.body.withValues(alpha: 0.22),
     );
   }
-
-  void _renderSplash(Canvas canvas, _Splash splash) {
-    final t = splash.age / _Splash.life;
-    canvas.drawCircle(
-      splash.at,
-      18 + 70 * t,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 4 * (1 - t)
-        ..color = const Color(0xFFFFE9A8).withValues(alpha: (1 - t) * 0.8),
-    );
-  }
 }
 
 /// How each species is drawn. Proportions only — nothing here affects where a
@@ -667,13 +529,3 @@ const _palettes = <FishSpecies, _Palette>{
     Color(0xFFFFF6C9),
   ),
 };
-
-/// An expanding ring where a fish was caught. Purely a reward animation.
-class _Splash {
-  _Splash(this.at);
-
-  static const life = 0.45;
-
-  final Offset at;
-  double age = 0;
-}

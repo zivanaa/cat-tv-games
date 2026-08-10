@@ -4,7 +4,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../cat/engine/cat_game.dart';
+import '../../cat/games/fish/fish_game.dart';
 import '../../cat/games/fish/fish_species.dart';
+import '../../cat/games/game_catalog.dart';
+import '../../cat/games/laser/laser_game.dart';
 import '../../cat/render/cat_surface.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/repositories/cat_profile_repository.dart';
@@ -35,6 +38,10 @@ class _HomeScreenState extends State<HomeScreen> {
   late final CatProfileRepository _cats =
       widget.cats ?? InMemoryCatProfileRepository();
 
+  /// Which mode the button will start. The pond first, because NEXT_STEPS.md
+  /// says to find out whether cats chase a slow fish before anything else.
+  String _mode = FishGame.gameId;
+
   Future<void> _startSession(BuildContext context) async {
     final profile = await _cats.current();
     if (!context.mounted) return;
@@ -44,6 +51,7 @@ class _HomeScreenState extends State<HomeScreen> {
         pageBuilder: (context, animation, secondaryAnimation) => CatSurface(
           limits: _limits,
           profile: profile,
+          mode: _mode,
           // Where the cat got to goes straight back to the repository, so the
           // next session starts from the climb rather than from the middle of
           // the ladder again.
@@ -93,8 +101,18 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: ConstrainedBox(
                     constraints: BoxConstraints(maxWidth: wide ? 780 : 420),
                     child: wide
-                        ? _WideLayout(mark: mark, onStart: _startSession)
-                        : _TallLayout(mark: mark, onStart: _startSession),
+                        ? _WideLayout(
+                            mark: mark,
+                            onStart: _startSession,
+                            mode: _mode,
+                            onPick: (id) => setState(() => _mode = id),
+                          )
+                        : _TallLayout(
+                            mark: mark,
+                            onStart: _startSession,
+                            mode: _mode,
+                            onPick: (id) => setState(() => _mode = id),
+                          ),
                   ),
                 ),
               );
@@ -109,10 +127,17 @@ class _HomeScreenState extends State<HomeScreen> {
 /// Landscape, and the layout the app actually ships in: who we are on the
 /// left, what to do about it on the right.
 class _WideLayout extends StatelessWidget {
-  const _WideLayout({required this.mark, required this.onStart});
+  const _WideLayout({
+    required this.mark,
+    required this.onStart,
+    required this.mode,
+    required this.onPick,
+  });
 
   final double mark;
   final void Function(BuildContext) onStart;
+  final String mode;
+  final ValueChanged<String> onPick;
 
   @override
   Widget build(BuildContext context) {
@@ -123,7 +148,14 @@ class _WideLayout extends StatelessWidget {
           child: _Identity(mark: mark, centred: false),
         ),
         const SizedBox(width: 44),
-        Expanded(child: _Actions(onStart: onStart, centred: false)),
+        Expanded(
+          child: _Actions(
+            onStart: onStart,
+            centred: false,
+            mode: mode,
+            onPick: onPick,
+          ),
+        ),
       ],
     );
   }
@@ -131,10 +163,17 @@ class _WideLayout extends StatelessWidget {
 
 /// Portrait: a browser window, a tablet held upright, the web preview.
 class _TallLayout extends StatelessWidget {
-  const _TallLayout({required this.mark, required this.onStart});
+  const _TallLayout({
+    required this.mark,
+    required this.onStart,
+    required this.mode,
+    required this.onPick,
+  });
 
   final double mark;
   final void Function(BuildContext) onStart;
+  final String mode;
+  final ValueChanged<String> onPick;
 
   @override
   Widget build(BuildContext context) {
@@ -143,7 +182,12 @@ class _TallLayout extends StatelessWidget {
       children: [
         _Identity(mark: mark, centred: true),
         const SizedBox(height: 34),
-        _Actions(onStart: onStart, centred: true),
+        _Actions(
+          onStart: onStart,
+          centred: true,
+          mode: mode,
+          onPick: onPick,
+        ),
       ],
     );
   }
@@ -178,10 +222,17 @@ class _Identity extends StatelessWidget {
 }
 
 class _Actions extends StatelessWidget {
-  const _Actions({required this.onStart, required this.centred});
+  const _Actions({
+    required this.onStart,
+    required this.centred,
+    required this.mode,
+    required this.onPick,
+  });
 
   final void Function(BuildContext) onStart;
   final bool centred;
+  final String mode;
+  final ValueChanged<String> onPick;
 
   @override
   Widget build(BuildContext context) {
@@ -190,8 +241,15 @@ class _Actions extends StatelessWidget {
       crossAxisAlignment:
           centred ? CrossAxisAlignment.center : CrossAxisAlignment.stretch,
       children: [
-        const _ModeCard(),
-        const SizedBox(height: 26),
+        for (final id in gameCatalog.keys) ...[
+          _ModeCard(
+            id: id,
+            selected: id == mode,
+            onPick: () => onPick(id),
+          ),
+          const SizedBox(height: 10),
+        ],
+        const SizedBox(height: 16),
         FilledButton(
           onPressed: () => onStart(context),
           child: const Text('Let the cat play'),
@@ -208,61 +266,126 @@ class _Actions extends StatelessWidget {
 
 /// The one game there is, presented as the one game there is.
 class _ModeCard extends StatelessWidget {
-  const _ModeCard();
+  const _ModeCard({
+    required this.id,
+    required this.selected,
+    required this.onPick,
+  });
+
+  final String id;
+  final bool selected;
+  final VoidCallback onPick;
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     const limits = SessionLimits();
+    final laser = id == LaserGame.gameId;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: InkWell(
+        onTap: onPick,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColours.line),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              gradient: const RadialGradient(
-                colors: [AppColours.shallow, AppColours.deep],
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            // The selected card is lit, the other is not. On a picker of two
+            // that is the whole affordance, and it has to survive a glance.
+            color: Colors.white.withValues(alpha: selected ? 0.06 : 0.02),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: selected ? AppColours.teal : AppColours.line,
+              width: selected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: RadialGradient(
+                    colors: laser
+                        ? const [Color(0xFF17301F), Color(0xFF05080D)]
+                        : const [AppColours.shallow, AppColours.deep],
+                  ),
+                ),
+                child: Center(
+                  child:
+                      laser ? const _LaserDot(size: 30) : const _Fish(size: 30),
+                ),
               ),
-            ),
-            child: const Center(child: _Fish(size: 30)),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Fish pond',
-                  style: text.titleMedium,
-                  overflow: TextOverflow.ellipsis,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      gameCatalog[id]!().displayName,
+                      style: text.titleMedium,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 3),
+                    // Ellipsis rather than wrap, so a narrow card loses the end
+                    // of a detail line instead of growing a second row and
+                    // pushing the button off a short screen.
+                    Text(
+                      laser
+                          ? '${modeBlurbs[id]}'
+                          : '${FishSpecies.values.length} species · '
+                              '${limits.maxDuration.inMinutes} minute session',
+                      style: text.bodySmall,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 3),
-                // Ellipsis rather than wrap, so a narrow card loses the end of
-                // a detail line instead of growing a second row and pushing
-                // the button off a short screen.
-                Text(
-                  '${FishSpecies.values.length} species · '
-                  '${limits.maxDuration.inMinutes} minute session',
-                  style: text.bodySmall,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
+              ),
+              Icon(
+                selected ? Icons.check_circle : Icons.circle_outlined,
+                color: selected ? AppColours.teal : AppColours.faint,
+                size: 20,
+              ),
+            ],
           ),
-          const Icon(Icons.check_circle, color: AppColours.teal, size: 20),
-        ],
+        ),
       ),
     );
   }
+}
+
+/// The laser's mark, so the picker shows what it is rather than describing it.
+class _LaserDot extends StatelessWidget {
+  const _LaserDot({required this.size});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) =>
+      CustomPaint(size: Size.square(size), painter: const _LaserPainter());
+}
+
+class _LaserPainter extends CustomPainter {
+  const _LaserPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final at = size.center(Offset.zero);
+    final r = size.shortestSide * 0.13;
+    canvas
+      ..drawCircle(
+        at,
+        r * 3.6,
+        Paint()..color = const Color(0xFF3BE07A).withValues(alpha: 0.22),
+      )
+      ..drawCircle(at, r, Paint()..color = const Color(0xFF9BFF6B))
+      ..drawCircle(at, r * 0.45, Paint()..color = const Color(0xFFFFFFFF));
+  }
+
+  @override
+  bool shouldRepaint(_LaserPainter oldDelegate) => false;
 }
 
 /// The badge above the title: a circle of pond with a fish in it.
