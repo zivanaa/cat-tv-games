@@ -1,11 +1,28 @@
 #!/bin/sh
 # Enforces branch naming, and keeps main from being pushed to directly.
 # Bypass either check with: git push --no-verify
+#
+# This reads the refs actually being pushed, from stdin, rather than looking at
+# whichever branch happens to be checked out. It used to do the latter, and the
+# difference is not academic: standing on main and running
+#
+#   git push origin --delete some/old-branch
+#
+# was refused, because the hook saw "main" and stopped there — even though the
+# push did not touch main at all. Anything done from a main checkout was
+# blocked regardless of where it was going.
+#
+# git supplies one line per ref, as:
+#
+#   <local ref> <local sha> <remote ref> <remote sha>
+#
+# A deletion arrives with the local sha set to all zeros.
 
-branch="$(git rev-parse --abbrev-ref HEAD)"
 types='feat|fix|chore|docs|refactor|test|perf|ci|build|style'
+zero='0000000000000000000000000000000000000000'
+status=0
 
-if [ "$branch" = "main" ]; then
+refuse_main() {
   cat >&2 <<MSG
 
   Refusing to push directly to main.
@@ -17,13 +34,12 @@ if [ "$branch" = "main" ]; then
     git push --no-verify
 
 MSG
-  exit 1
-fi
+}
 
-if ! printf '%s' "$branch" | grep -qE "^($types)/([0-9]+-)?[a-z0-9]+(-[a-z0-9]+)*$"; then
+refuse_name() {
   cat >&2 <<MSG
 
-  Branch name rejected: $branch
+  Branch name rejected: $1
 
   Format:  <type>/<kebab-case-description>
            <type>/<issue-number>-<kebab-case-description>
@@ -40,7 +56,38 @@ if ! printf '%s' "$branch" | grep -qE "^($types)/([0-9]+-)?[a-z0-9]+(-[a-z0-9]+)
     git branch -m feat/your-description
 
 MSG
-  exit 1
-fi
+}
 
-exit 0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Only branches are policed. Tags and anything else go through untouched.
+  case "$remote_ref" in
+    refs/heads/*) branch="${remote_ref#refs/heads/}" ;;
+    *) continue ;;
+  esac
+
+  if [ "$local_sha" = "$zero" ]; then
+    # A deletion. Removing a merged branch is tidying up, and the hook has no
+    # business stopping it — except for main, where it is never what anyone
+    # meant to do.
+    if [ "$branch" = "main" ]; then
+      echo "" >&2
+      echo "  Refusing to delete main." >&2
+      echo "" >&2
+      status=1
+    fi
+    continue
+  fi
+
+  if [ "$branch" = "main" ]; then
+    refuse_main
+    status=1
+    continue
+  fi
+
+  if ! printf '%s' "$branch" | grep -qE "^($types)/([0-9]+-)?[a-z0-9]+(-[a-z0-9]+)*$"; then
+    refuse_name "$branch"
+    status=1
+  fi
+done
+
+exit $status
